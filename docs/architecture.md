@@ -26,7 +26,8 @@ backend/src/harbor/
 规则：
 
 1. `features/<name>/` 自带 `router.py`、`schemas.py`，需要时再加 `service.py`、
-   `repo.py`、`models.py`。功能之间不直接 import 对方的内部模块。
+   `repo.py`、`models/`（领域模型较多时按类拆成独立文件，用 `__init__.py`
+   统一 re-export）。功能之间不直接 import 对方的内部模块。
 2. `core/` 只放配置、日志、错误等基础设施，**不得 import `features/`**。
 3. `agents/` 是横切层，可以调用 feature service；**feature 不得反向依赖
    `agents/`**。

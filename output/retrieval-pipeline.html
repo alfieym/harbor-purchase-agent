@@ -1,0 +1,502 @@
+<title>检索管线五阶段</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  /* Layout: flow overview → five stage panels (data flow) → five mechanism cards (how each stage works).
+     Palette: warm-neutral paper + teal identity; green=pass, red=drop (always with a text reason). */
+  :root {
+    --bg: #F6F5F1;
+    --surface: #FFFFFF;
+    --surface-2: #EFEEE9;
+    --fg: #1B1D21;
+    --muted: #6A6E75;
+    --faint: #9BA0A7;
+    --border: #E3E1DA;
+    --accent: #0E7A6B;
+    --accent-ink: #07584C;
+    --good: #1E8E3E;
+    --good-soft: #E8F4EC;
+    --bad: #C5221F;
+    --bad-soft: #FBEAEA;
+    --seq: #0E7A6B;
+    --warn: #9A6700;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A;
+      --surface: #1B1F26;
+      --surface-2: #232831;
+      --fg: #E7E9EC;
+      --muted: #9BA1A9;
+      --faint: #6F767F;
+      --border: #2C323B;
+      --accent: #2BBBA4;
+      --accent-ink: #8FE3D3;
+      --good: #4CC38A;
+      --good-soft: #16301F;
+      --bad: #F87171;
+      --bad-soft: #3A1C1C;
+      --seq: #2BBBA4;
+      --warn: #E0A63C;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A;
+    --surface: #1B1F26;
+    --surface-2: #232831;
+    --fg: #E7E9EC;
+    --muted: #9BA1A9;
+    --faint: #6F767F;
+    --border: #2C323B;
+    --accent: #2BBBA4;
+    --accent-ink: #8FE3D3;
+    --good: #4CC38A;
+    --good-soft: #16301F;
+    --bad: #F87171;
+    --bad-soft: #3A1C1C;
+    --seq: #2BBBA4;
+    --warn: #E0A63C;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(48px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; }
+  header { margin-bottom: 20px; }
+  .kicker {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent-ink); margin: 0 0 8px;
+  }
+  h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 68ch; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .chip {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg);
+  }
+  .chip.query { border-color: var(--accent); color: var(--accent-ink); }
+
+  .flow {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    padding: 14px 16px; margin-bottom: 10px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  }
+  .flow-step { display: flex; flex-direction: column; align-items: center; min-width: 64px; padding: 2px 8px; }
+  .fidx { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); }
+  .fname { font-size: 14px; font-weight: 600; }
+  .fcount { font-family: "IBM Plex Mono", monospace; font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .flow-link { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--faint); }
+  .farrow { font-size: 18px; line-height: 1; }
+  .floss { font-size: 11px; color: var(--bad); font-family: "IBM Plex Mono", monospace; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+
+  .stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 12px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .panel-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .panel-num { font-family: "IBM Plex Mono", monospace; color: var(--accent-ink); font-size: 13px; }
+  .panel-name { font-weight: 600; font-size: 15px; }
+  .panel-job { margin-left: auto; font-size: 12px; color: var(--faint); font-family: "IBM Plex Mono", monospace; }
+  .panel-body { padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+
+  .row {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center;
+    padding: 6px 8px; border-radius: 8px; border: 1px solid transparent;
+    transition: opacity .12s ease;
+  }
+  .row:focus-visible, .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .id { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+  .id .rk { color: var(--accent-ink); margin-right: 4px; font-weight: 500; }
+  .body { display: flex; flex-direction: column; min-width: 0; }
+  .t { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m { font-size: 11px; color: var(--muted); font-family: "IBM Plex Mono", monospace; }
+  .s { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .snum { font-family: "IBM Plex Mono", monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .bar { width: 60px; height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--seq); border-radius: 3px; }
+  .v { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
+  .v.pass { color: var(--good); background: var(--good-soft); }
+  .v.drop { color: var(--bad); background: var(--bad-soft); }
+  .row.drop { opacity: .55; }
+  .row.drop .t { text-decoration: line-through; text-decoration-color: var(--bad); }
+
+  .cut { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; color: var(--bad); font-size: 11px; font-family: "IBM Plex Mono", monospace; }
+  .cut::before, .cut::after { content: ""; flex: 1; height: 1px; background: var(--bad); opacity: .35; }
+  .subhead { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin: 4px 4px 2px; }
+
+  .cards { display: flex; flex-direction: column; gap: 6px; }
+  .card { font-family: "IBM Plex Mono", monospace; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--surface-2); }
+  .card .k { color: var(--accent-ink); }
+  .card .str { color: var(--good); }
+  .card .num { color: var(--fg); }
+
+  .note { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+
+  /* Mechanism section */
+  .mhead { margin: 34px 0 4px; font-size: 19px; font-weight: 700; }
+  .msub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .mech { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .mech-head { display: flex; align-items: baseline; gap: 8px; }
+  .mech-name { font-weight: 600; font-size: 15px; }
+  .mech-q { margin-left: auto; font-size: 12px; color: var(--faint); }
+  .mstep { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+  .mstep .sn { font-family: "IBM Plex Mono", monospace; color: var(--accent-ink); font-weight: 500; }
+  .mono { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .formula { font-family: "IBM Plex Mono", monospace; font-size: 13px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; overflow-x: auto; white-space: nowrap; }
+  .recipe { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-family: "IBM Plex Mono", monospace; font-size: 11px; }
+  .recipe .f { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; }
+  .recipe .plus { color: var(--faint); }
+  .svgbox { text-align: center; }
+  .svgcap { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  .gate { display: flex; flex-direction: column; gap: 4px; }
+  .grow { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); }
+  .gpred { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .gtag { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 1px 6px; border-radius: 5px; letter-spacing: .03em; }
+  .gtag.must { background: var(--good-soft); color: var(--good); }
+  .gtag.mustnot { background: var(--bad-soft); color: var(--bad); }
+  .gstat { font-family: "IBM Plex Mono", monospace; font-weight: 500; min-width: 16px; text-align: center; }
+  .grow.ok { border-color: var(--good); background: var(--good-soft); }
+  .grow.ok .gstat { color: var(--good); }
+  .grow.no { border-color: var(--bad); background: var(--bad-soft); }
+  .grow.no .gstat { color: var(--bad); }
+  .gate-hint { font-size: 11px; color: var(--faint); }
+
+  /* Upstream section */
+  .upgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .upcard { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .upcard h3 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px dashed; letter-spacing: .03em; }
+  .badge.done { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .badge.todo { color: var(--warn); border-color: var(--warn); }
+  .call { font-family: "IBM Plex Mono", monospace; font-size: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; }
+  .vflow { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .vstep { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  .vstep.todo { border-style: dashed; border-color: var(--warn); }
+  .vstep.done { border-color: var(--good); background: var(--good-soft); }
+  .varrow { color: var(--faint); font-size: 15px; line-height: 1; }
+  .vnote { font-size: 12px; color: var(--muted); margin: 0; }
+  .vnote b { color: var(--fg); }
+
+  /* Timing lanes */
+  .tl-track { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+  .tl-track:last-of-type { border-bottom: none; }
+  .tl-label { font-size: 13px; font-weight: 600; min-width: 64px; }
+  .tl-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
+  .tl-node { font-family: "IBM Plex Mono", monospace; font-size: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; white-space: nowrap; }
+  .tl-arrow { color: var(--faint); font-size: 14px; }
+  .tl-tag { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+  .tl-tag.pre { color: var(--accent-ink); border-color: var(--accent); background: var(--surface-2); }
+  .tl-tag.live { color: var(--warn); border-color: var(--warn); }
+  .tl-note { font-size: 12px; color: var(--muted); margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tl-note b { color: var(--fg); }
+
+  .idxstrip { display: flex; gap: 4px; flex-wrap: wrap; }
+  .idx { flex: 1; min-width: 26px; text-align: center; font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 6px 4px; border-radius: 6px; border: 1px solid var(--border); }
+  .idx.keep { background: var(--good-soft); color: var(--good); border-color: var(--good); }
+  .idx.cut { background: var(--bad-soft); color: var(--bad); border-color: var(--bad); }
+  .idx .i { display: block; font-size: 10px; color: var(--muted); }
+
+  body.tracing .row, body.tracing .card { opacity: .28; }
+  body.tracing .trace { opacity: 1; box-shadow: 0 0 0 2px var(--accent); }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { gap: 2px; padding: 12px 8px; }
+    .flow-step { min-width: 0; padding: 2px 4px; }
+    .fcount { font-size: 17px; }
+    .farrow { font-size: 15px; }
+    .bar { width: 48px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .row, .card { transition: none; }
+  }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Catalog Search</p>
+    <h1>打分 → 过滤 → 排序 → 截断 → 组装</h1>
+    <p class="sub">14 件商品流经检索管线的五段，看哪些被硬约束挡下、以及为什么。悬停任意商品，追踪它在五个阶段中的去向，并看它逐条通过/失败过滤条件。</p>
+    <div class="chips" id="chips"></div>
+
+    <div class="flow" aria-label="管线概览">
+      <div class="flow-step"><span class="fidx">①</span><span class="fname">打分</span><span class="fcount">14</span></div>
+      <div class="flow-link"><span class="farrow">→</span></div>
+      <div class="flow-step"><span class="fidx">②</span><span class="fname">过滤</span><span class="fcount">8</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="floss">−6 被过滤</span></div>
+      <div class="flow-step"><span class="fidx">③</span><span class="fname">排序</span><span class="fcount">8</span></div>
+      <div class="flow-link"><span class="farrow">→</span></div>
+      <div class="flow-step"><span class="fidx">④</span><span class="fname">截断</span><span class="fcount">5</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="floss">−3 被截断</span></div>
+      <div class="flow-step"><span class="fidx">⑤</span><span class="fname">组装</span><span class="fcount">5</span></div>
+    </div>
+    <p class="hint">悬停或键盘聚焦任意商品行 → 同一商品在五个阶段中同步高亮，过滤门会显示它逐条通过/失败。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="stages" id="stages"></div>
+  <div class="note" id="note"></div>
+
+  <h2 class="mhead">每个阶段在做什么</h2>
+  <p class="msub">机制拆解 —— 打分如何算、过滤条件是什么、截断如何切。</p>
+  <div class="stages" id="mechs"></div>
+
+  <h2 class="mhead">上游：向量与过滤条件从哪里来</h2>
+  <p class="msub">回答两个前置问题：向量由谁产生、过滤条件由谁填进 spec。</p>
+  <div class="upgrid">
+    <section class="upcard">
+      <h3>向量从哪里来？ <span class="badge done">已实现</span></h3>
+      <p class="vnote">向量<b>不是我们算的</b>——由外部 embedding 模型（transformer 神经网络）通过 HTTP 接口返回。项目里的 <span class="mono">OpenAIEmbedder</span> 只负责发起请求：</p>
+      <div class="call">POST {openai_base_url}/embeddings
+Authorization: Bearer &lt;api_key&gt;
+{"model": "text-embedding-3-small", "input": ["养猫 轻便 吸尘器", "…"]}
+
+→ 返回 data[].embedding（每段文本一个固定维度浮点向量）</div>
+      <p class="vnote">配置：<span class="mono">openai_base_url</span> / <span class="mono">openai_api_key</span> / <span class="mono">openai_embedding_model</span>（默认 <span class="mono">text-embedding-3-small</span>）。</p>
+      <p class="vnote">本演示的 <span class="mono">FakeEmbedder</span> 是它的离线替身：字符频率计数 + 归一化，确定性、不联网，仅用于测试和这张图。</p>
+    </section>
+
+    <section class="upcard">
+      <h3>过滤条件从哪里来？ <span class="badge todo">未实现</span></h3>
+      <p class="vnote">过滤条件来自 <span class="mono">ProductSearchSpec</span>；但「自然语言 → 结构化 spec」这一步<b>目前还没写</b>。完整链路应是：</p>
+      <div class="vflow">
+        <div class="vstep todo"><b>① 意图 / 槽位提取</b>（LLM 解析自然语言）—— 未实现<br>
+        <span class="mono">"2000元以内、轻一点、养猫、吸尘器"</span> → 拆成 spec 字段</div>
+        <span class="varrow">↓</span>
+        <div class="vstep done"><b>② 检索</b>（已实现 QdrantProductSearch）<br>
+        <span class="mono">ProductSearchSpec(category=家用电器, price_max=2000, weight_max=1.5, currency=CNY, excluded=["过敏原"])</span></div>
+      </div>
+      <p class="vnote">槽位映射：<span class="mono">"2000元以内" → price_max=2000</span>、<span class="mono">"轻一点" → weight_max=1.5</span>、<span class="mono">"吸尘器" → category=家用电器</span>、<span class="mono">"养猫" → query_text 语义</span>。</p>
+      <p class="vnote">在演示与现有代码里，spec 都是<b>手工构造</b>的；① 是下一步要做的事——一个 LLM 结构化提取调用，之后可挂成 AgentScope 工具。</p>
+    </section>
+  </div>
+
+  <h2 class="mhead">向量何时算、在哪里调用</h2>
+  <p class="msub">商品向量预计算、查询向量实时算——两个时机，两处调用，都走同一个 <span class="mono">embed()</span>。</p>
+  <section class="upcard">
+    <div class="tl-track">
+      <span class="tl-label">商品向量</span>
+      <div class="tl-flow">
+        <span class="tl-node">recreate(products)</span><span class="tl-arrow">→</span>
+        <span class="tl-node">embed(texts) · 全部商品文本</span><span class="tl-arrow">→</span>
+        <span class="tl-node">upsert 存进 Qdrant</span>
+      </div>
+      <span class="tl-tag pre">预计算 · 之后不重算</span>
+    </div>
+    <div class="tl-track">
+      <span class="tl-label">查询向量</span>
+      <div class="tl-flow">
+        <span class="tl-node">search(query)</span><span class="tl-arrow">→</span>
+        <span class="tl-node">embed([query_text]) · 单条查询</span><span class="tl-arrow">→</span>
+        <span class="tl-node">与库中向量比相似度</span>
+      </div>
+      <span class="tl-tag live">实时 · 每次请求</span>
+    </div>
+    <div class="call"># 商品向量 — 索引阶段（recreate 里，批量）
+qdrant_indexer.py:44   vectors = self._embedder.embed(texts)
+
+# 查询向量 — 查询阶段（search 里，单条）
+qdrant_search.py:64   vector = self._embedder.embed([query_text])[0]</div>
+    <p class="tl-note"><span class="badge todo">仅测试调用</span><span>目前 <b>尚未接进运行中的 FastAPI</b>：启动时建索引、查询路由都还没接线。</span></p>
+  </section>
+</main>
+
+<script>
+  const CHECKS = [
+    { key: "currency", label: "币种",    pred: 'currency == "CNY"',     clause: "must" },
+    { key: "price",    label: "价格",    pred: "min_price ≤ 2000",       clause: "must" },
+    { key: "weight",   label: "重量",    pred: "weight_kg ≤ 1.5",        clause: "must" },
+    { key: "category", label: "类目",    pred: 'category == "家用电器"', clause: "must" },
+    { key: "tag",      label: "材质",    pred: 'material_tags ∌ "过敏原"', clause: "must_not" },
+  ];
+
+  // checks 顺序：currency, price, weight, category, tag
+  const PRODUCTS = [
+    { id: "V102", title: "无线吸尘器 养猫家庭 除猫毛 轻巧", score: 0.855, price: "¥1299", weight: "1.2kg", checks: [1,1,1,1,1] },
+    { id: "V104", title: "旗舰吸尘器 猫毛 大吸力",         score: 0.825, price: "¥4000", weight: "1.0kg", checks: [1,0,1,1,1] },
+    { id: "V101", title: "轻量无线吸尘器 猫毛专用 养猫家庭", score: 0.824, price: "¥899",  weight: "0.6kg", checks: [1,1,1,1,1] },
+    { id: "V109", title: "吸尘器 静音 猫毛",               score: 0.778, price: "¥899",  weight: "0.7kg", checks: [1,1,1,1,0] },
+    { id: "V105", title: "强力吸尘器 猫毛 工业级",         score: 0.730, price: "¥999",  weight: "6.0kg", checks: [1,1,0,1,1] },
+    { id: "D204", title: "吸尘器 猫毛 海外版",             score: 0.730, price: "$100",  weight: "0.5kg", checks: [0,1,1,1,1] },
+    { id: "V106", title: "吸尘器 入门款 轻便",             score: 0.727, price: "¥2000", weight: "1.0kg", checks: [1,1,1,1,1] },
+    { id: "V103", title: "轻量手持吸尘器",                 score: 0.709, price: "¥699",  weight: "0.8kg", checks: [1,1,1,1,1] },
+    { id: "V108", title: "吸尘器 双版本 猫毛",             score: 0.700, price: "¥999",  weight: "1.0kg", checks: [1,1,1,1,1] },
+    { id: "V107", title: "吸尘器 便携款",                 score: 0.657, price: "¥500",  weight: "1.5kg", checks: [1,1,1,1,1] },
+    { id: "D202", title: "负离子吹风机 宠物吹毛",         score: 0.563, price: "¥800",  weight: "0.5kg", checks: [1,1,1,1,1] },
+    { id: "D201", title: "宠物出行包 猫包 轻便",           score: 0.534, price: "¥500",  weight: "0.8kg", checks: [1,1,1,0,1] },
+    { id: "D205", title: "猫砂盆 养猫必备",               score: 0.516, price: "¥200",  weight: "3.0kg", checks: [1,1,0,0,1] },
+    { id: "D203", title: "静音加湿器",                     score: 0.485, price: "¥300",  weight: "1.0kg", checks: [1,1,1,1,1] },
+  ];
+
+  const QUERY = "养猫 轻便 吸尘器";
+  const SPEC_CHIPS = [
+    ["query", `query = "${QUERY}"`],
+    [null, "类目 = 家用电器"], [null, "价格 ≤ ¥2000"], [null, "重量 ≤ 1.5kg"],
+    [null, "币种 = CNY"], [null, "排除材质 = 过敏原"],
+  ];
+
+  const productsById = Object.fromEntries(PRODUCTS.map(p => [p.id, p]));
+  const reasonsOf = p => CHECKS.filter(c => !p.checks[CHECKS.indexOf(c)]).map(c => c.label);
+  const byScore = (a, b) => (b.score - a.score) || (a.id < b.id ? -1 : 1);
+
+  const ranked = [...PRODUCTS].sort(byScore);
+  const passOf = p => reasonsOf(p).length === 0;
+  const survivors2 = PRODUCTS.filter(passOf).sort(byScore);
+  const rejected = PRODUCTS.filter(p => !passOf(p)).sort(byScore);
+  const kept = survivors2.slice(0, 5);
+  const cut = survivors2.slice(5);
+
+  function bar(p) {
+    return `<span class="s"><span class="snum">${p.score.toFixed(3)}</span>` +
+      `<span class="bar"><i style="width:${(p.score * 100).toFixed(1)}%"></i></span></span>`;
+  }
+  function row(p, rank) {
+    const rk = rank != null ? `<span class="rk">${rank}</span>` : "";
+    return `<div class="row" data-pid="${p.id}" tabindex="0">` +
+      `<span class="id">${rk}${p.id}</span>` +
+      `<span class="body"><span class="t">${p.title}</span><span class="m">${p.weight} · ${p.price}</span></span>` +
+      bar(p) + `</div>`;
+  }
+  function verdictRow(p) {
+    const v = passOf(p)
+      ? `<span class="v pass">✓ 通过</span>`
+      : `<span class="v drop">✗ ${reasonsOf(p).join(" · ")}</span>`;
+    return `<div class="row ${passOf(p) ? "" : "drop"}" data-pid="${p.id}" tabindex="0">` +
+      `<span class="id">${p.id}</span>` +
+      `<span class="body"><span class="t">${p.title}</span><span class="m">${p.weight} · ${p.price}</span></span>` +
+      `<span class="s">${v}</span>` + `</div>`;
+  }
+
+  const stages = [
+    { n: "①", name: "打分", job: "score · 14", body: ranked.map(p => row(p)).join("") },
+    { n: "②", name: "过滤", job: "filter · 8",
+      body: survivors2.map(p => verdictRow(p)).join("") +
+        `<div class="subhead">被硬约束挡下 · ${rejected.length}</div>` +
+        rejected.map(p => verdictRow(p)).join("") },
+    { n: "③", name: "排序", job: "sort · 8", body: survivors2.map((p, i) => row(p, i + 1)).join("") },
+    { n: "④", name: "截断", job: "truncate · 5",
+      body: kept.map((p, i) => row(p, i + 1)).join("") +
+        `<div class="cut">截断线 · 丢弃 ${cut.length} 条</div>` +
+        cut.map((p, i) => row(p, i + 6)).join("") },
+    { n: "⑤", name: "组装", job: "assemble · 5",
+      body: `<div class="cards">` + kept.map(p =>
+        `<div class="card" data-pid="${p.id}" tabindex="0"><span class="k">SearchHit(</span>` +
+        `product=<span class="str">"${p.title}"</span>, score=<span class="num">${p.score.toFixed(3)}</span><span class="k">)</span></div>`
+      ).join("") + `</div>` },
+  ];
+
+  document.getElementById("chips").innerHTML = SPEC_CHIPS.map(([kind, text]) =>
+    `<span class="chip ${kind || ""}">${text}</span>`).join("");
+  document.getElementById("stages").innerHTML = stages.map(s =>
+    `<section class="panel"><div class="panel-head">` +
+    `<span class="panel-num">${s.n}</span><span class="panel-name">${s.name}</span>` +
+    `<span class="panel-job">${s.job}</span></div><div class="panel-body">${s.body}</div></section>`).join("");
+
+  document.getElementById("note").innerHTML =
+    `<b>边界与特殊样本：</b>` +
+    `V106 价格恰 = ¥2000（≤ 通过）、V107 重量恰 = 1.5kg（≤ 通过）、` +
+    `V108 双 SKU（¥2500 / ¥999）按最低价 ¥999 通过、D204 币种 USD 被排除、` +
+    `D201「猫包」语义相关但类目错。评分由字符频率假向量产生，仅用于确定性地演示管线，不代表真实语义。`;
+
+  /* ---- mechanism cards ---- */
+  const mechHTML = [
+    // ① 打分
+    `<section class="mech"><div class="mech-head"><span class="panel-num">①</span>` +
+      `<span class="mech-name">打分</span><span class="mech-q">分数是怎么算出来的？</span></div>` +
+      `<div class="mstep"><span class="sn">1</span><span>查询文本 <span class="mono">"${QUERY}"</span> → <span class="mono">embed()</span> → 查询向量 <b>q</b>（32 维浮点）</span></div>` +
+      `<div class="mstep"><span class="sn">2</span><span>每件商品 → <span class="mono">product_text()</span> 拼成一段文本 → <span class="mono">embed()</span> → 商品向量 <b>p</b></span></div>` +
+      `<div class="recipe">` + ["title", "brand", "category", "description", "highlights", "material_tags"]
+        .map((f, i) => (i ? `<span class="plus">+</span>` : "") + `<span class="f">${f}</span>`).join("") + `</div>` +
+      `<div class="mstep"><span class="sn">3</span><span>分数 = 余弦相似度（两单位向量点积）∈ [0,1]，夹角越小越相关</span></div>` +
+      `<div class="formula">score = cosine(q, p) = q · p = cos θ</div>` +
+      `<div class="svgbox"><svg width="210" height="120" viewBox="0 0 210 120" aria-label="余弦夹角示意">` +
+        `<line x1="18" y1="88" x2="180" y2="88" stroke="var(--accent)" stroke-width="2.5"/>` +
+        `<line x1="18" y1="88" x2="168" y2="44" stroke="var(--good)" stroke-width="2.5"/>` +
+        `<line x1="18" y1="88" x2="70" y2="20" stroke="var(--bad)" stroke-width="2.5"/>` +
+        `<path d="M 62 88 A 44 44 0 0 0 60.5 74.4" fill="none" stroke="var(--accent-ink)" stroke-width="1.5"/>` +
+        `<path d="M 80 88 A 62 62 0 0 0 53.6 39" fill="none" stroke="var(--faint)" stroke-width="1.5"/>` +
+        `<text x="186" y="92" font-size="13" fill="var(--accent)" font-family="IBM Plex Mono,monospace">q</text>` +
+        `<text x="172" y="38" font-size="12" fill="var(--good)" font-family="IBM Plex Mono,monospace">p₁</text>` +
+        `<text x="72" y="15" font-size="12" fill="var(--bad)" font-family="IBM Plex Mono,monospace">p₂</text>` +
+        `<text x="63" y="84" font-size="10" fill="var(--accent-ink)" font-family="IBM Plex Mono,monospace">θ₁</text>` +
+        `<text x="56" y="60" font-size="10" fill="var(--faint)" font-family="IBM Plex Mono,monospace">θ₂</text>` +
+        `</svg><div class="svgcap">θ₁（小夹角）→ cos 高 → 分数高；θ₂（大夹角）→ cos 低 → 分数低</div></div></section>`,
+
+    // ② 过滤
+    `<section class="mech"><div class="mech-head"><span class="panel-num">②</span>` +
+      `<span class="mech-name">过滤</span><span class="mech-q">硬约束是什么？</span></div>` +
+      `<div class="mstep"><span class="sn">·</span><span>5 条硬约束是 <b>AND</b> 关系——<b>任一条失败即丢弃</b>。每条都对应 Qdrant <span class="mono">filter</span> 的一个 <span class="mono">must</span> / <span class="mono">must_not</span> 子句。</span></div>` +
+      `<div class="gate" id="gate">` +
+      CHECKS.map(c => `<div class="grow" data-check="${c.key}">` +
+        `<span class="gpred">${c.pred}</span>` +
+        `<span class="gtag ${c.clause === "must" ? "must" : "mustnot"}">${c.clause}</span>` +
+        `<span class="gstat"></span></div>`).join("") + `</div>` +
+      `<div class="gate-hint">悬停任意商品，查看它逐条 ✓/✗；「价格」取该商品多 SKU 中的最低价。</div></section>`,
+
+    // ③ 排序
+    `<section class="mech"><div class="mech-head"><span class="panel-num">③</span>` +
+      `<span class="mech-name">排序</span><span class="mech-q">按什么排？</span></div>` +
+      `<div class="formula">sorted(幸存者, key = (-score, product_id))</div>` +
+      `<div class="mstep"><span class="sn">·</span><span>按 <span class="mono">score</span> <b>降序</b>（分数高在前）；同分时按 <span class="mono">product_id</span> 升序作确定性 tie-break，保证结果可复现。</span></div>` +
+      `<div class="mstep"><span class="sn">·</span><span>本数据 8 个幸存者分数互不相同，见「③ 排序」面板的 1–8 名次与评分条。</span></div></section>`,
+
+    // ④ 截断
+    `<section class="mech"><div class="mech-head"><span class="panel-num">④</span>` +
+      `<span class="mech-name">截断</span><span class="mech-q">原理是什么？</span></div>` +
+      `<div class="formula">sorted_[:5]   ←  取前 5 个，其余丢弃</div>` +
+      `<div class="mstep"><span class="sn">·</span><span>排序后得到有序列表，用 <span class="mono">limit=5</span> 做切片：索引 <span class="mono">0–4</span> 保留，<span class="mono">5–7</span> 丢弃。</span></div>` +
+      `<div class="idxstrip">` + survivors2.map((p, i) =>
+        `<div class="idx ${i < 5 ? "keep" : "cut"}"><span class="i">#${i}</span>${p.id}</div>`).join("") + `</div></section>`,
+
+    // ⑤ 组装
+    `<section class="mech"><div class="mech-head"><span class="panel-num">⑤</span>` +
+      `<span class="mech-name">组装</span><span class="mech-q">结果长什么样？</span></div>` +
+      `<div class="mstep"><span class="sn">1</span><span>每个保留项是 <span class="mono">(Product, score)</span> 元组。</span></div>` +
+      `<div class="mstep"><span class="sn">2</span><span>逐一映射为 <span class="mono">SearchHit(product=…, score=…)</span> 结果对象。</span></div>` +
+      `<div class="formula">SearchHit = (product=商品, score=相似度)</div>` +
+      `<div class="mstep"><span class="sn">·</span><span>在 Qdrant 路径里 <span class="mono">product</span> 从 payload 快照重建，无需回查仓库（catalog 只读）。</span></div></section>`,
+  ].join("");
+
+  document.getElementById("mechs").innerHTML = mechHTML;
+
+  /* ---- trace: hover highlights same product + updates the filter gate ---- */
+  const nodes = [...document.querySelectorAll("[data-pid]")];
+  const gateRows = [...document.querySelectorAll("#gate .grow")];
+  function updateGate(pid) {
+    const p = pid ? productsById[pid] : null;
+    gateRows.forEach(g => {
+      const idx = CHECKS.findIndex(c => c.key === g.dataset.check);
+      const st = g.querySelector(".gstat");
+      g.classList.remove("ok", "no");
+      if (!p) { st.textContent = ""; return; }
+      const ok = p.checks[idx] === 1;
+      st.textContent = ok ? "✓" : "✗";
+      g.classList.toggle(ok ? "ok" : "no", true);
+    });
+  }
+  function setTrace(pid) {
+    nodes.forEach(x => x.classList.toggle("trace", x.dataset.pid === pid));
+    updateGate(pid);
+  }
+  nodes.forEach(n => {
+    n.addEventListener("mouseenter", () => { document.body.classList.add("tracing"); setTrace(n.dataset.pid); });
+    n.addEventListener("mouseleave", () => { document.body.classList.remove("tracing"); nodes.forEach(x => x.classList.remove("trace")); updateGate(null); });
+    n.addEventListener("focus", () => { document.body.classList.add("tracing"); setTrace(n.dataset.pid); });
+    n.addEventListener("blur", () => { document.body.classList.remove("tracing"); nodes.forEach(x => x.classList.remove("trace")); updateGate(null); });
+  });
+</script>

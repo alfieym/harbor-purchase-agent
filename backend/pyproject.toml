@@ -7,12 +7,13 @@ dependencies = [
     "fastapi>=0.162,<1",
     "uvicorn[standard]>=0.54,<1",
     "pydantic-settings>=2.16,<3",
+    "qdrant-client>=1.20.0",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.2,<10",
-    "httpx>=0.28,<0.29",
     "ruff>=0.17,<0.18",
     "mypy>=2.4,<3",
 ]
@@ -23,6 +24,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/harbor"]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

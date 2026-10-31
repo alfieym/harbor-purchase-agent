@@ -39,6 +39,12 @@ class Settings(BaseSettings):
         default="deepseek-chat",
         validation_alias=AliasChoices("OPENAI_MODEL", "HARBOR_OPENAI_MODEL"),
     )
+    openai_embedding_model: str = Field(
+        default="text-embedding-3-small",
+        validation_alias=AliasChoices("OPENAI_EMBEDDING_MODEL", "HARBOR_OPENAI_EMBEDDING_MODEL"),
+    )
+    # Unfiltered semantic window used to report rejected candidates (S2-2).
+    search_candidate_pool_size: int = Field(default=100, ge=1)
 
     @property
     def is_development(self) -> bool:
