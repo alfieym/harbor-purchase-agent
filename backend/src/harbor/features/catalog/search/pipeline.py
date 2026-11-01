@@ -1,16 +1,18 @@
-"""Transparent six-stage reference pipeline for catalog search.
+"""Transparent reference pipeline for catalog search (fallback-chain recall, S3).
 
-``QdrantProductSearch`` compresses scoring / filtering / sorting / truncation
-into a single ``query_points`` call; this module spells the same six stages out
-in Python so each stage's effect can be inspected, taught and tested.
+``QdrantProductSearch`` runs the same recall fallback chain in Qdrant; this module
+spells it out in Python so each stage can be inspected, taught and tested.
 
-   打分(score) → 过滤(filter) → 排序(sort) → 去重(dedupe) → 截断(truncate) → 组装(assemble)
+   exact_id_lookup → 打分(embedding) → 过滤 → 精排 → 去重 → 截断 → 组装
+                     （embedding 失败时降级为 keyword_2gram 打分）
 
 It is a reference oracle and teaching aid, not the production hot path (which
-stays on Qdrant): both paths must agree on the same inputs, which the tests
-``test_search_pipeline.py`` and ``test_rejected_reasons.py`` check.
+stays on Qdrant): both paths must agree on the same inputs, which the tests check.
+``sort`` remains as the dense-ordering helper used by tests to inspect stage 1.
 """
 
+import logging
+import time
 from collections.abc import Sequence
 
 from harbor.features.catalog.models import Product, ProductSearchSpec
@@ -23,8 +25,13 @@ from harbor.features.catalog.search.constraints import (
 )
 from harbor.features.catalog.search.dedupe import dedupe_by_canonical
 from harbor.features.catalog.search.embedder import Embedder, product_text
+from harbor.features.catalog.search.lexical import LexicalVectorizer, sparse_dot
+from harbor.features.catalog.search.rerank import Reranker, apply_rerank
 from harbor.features.catalog.search.schemas import (
+    RecallStrategy,
     RejectedCandidate,
+    RerankStatus,
+    SearchDiagnostics,
     SearchHit,
     SearchResult,
 )
@@ -32,7 +39,10 @@ from harbor.features.catalog.search.schemas import (
 # A candidate paired with its similarity score (stage 1 output).
 ScoredProduct = tuple[Product, float]
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_CANDIDATE_POOL_SIZE = 100
+DEFAULT_RERANK_TOP_K = 30
 
 
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
@@ -41,13 +51,20 @@ def cosine(a: Sequence[float], b: Sequence[float]) -> float:
 
 
 class SearchPipeline:
-    """Runs the six stages and exposes each as an inspectable method."""
+    """Runs the fallback-chain recall and exposes each stage as an inspectable method."""
 
-    def __init__(self, embedder: Embedder) -> None:
+    def __init__(
+        self,
+        embedder: Embedder,
+        reranker: Reranker | None = None,
+        rerank_top_k: int = DEFAULT_RERANK_TOP_K,
+    ) -> None:
         self._embedder = embedder
+        self._reranker = reranker
+        self._rerank_top_k = rerank_top_k
 
     def score(self, query_text: str, products: Sequence[Product]) -> list[ScoredProduct]:
-        """Stage 1 — 打分: score every candidate, no filtering yet."""
+        """Stage — 打分(embedding): dual-tower dense cosine score per candidate."""
         query_vector = self._embedder.embed([query_text])[0]
         vectors = self._embedder.embed([product_text(product) for product in products])
         return [
@@ -56,32 +73,60 @@ class SearchPipeline:
         ]
 
     @staticmethod
-    def filter(spec: ProductSearchSpec, scored: Sequence[ScoredProduct]) -> list[ScoredProduct]:
-        """Stage 2 — 过滤: drop candidates that fail any hard constraint."""
-        return [(product, score) for product, score in scored if matches(product, spec)]
+    def lexical_score(query_text: str, products: Sequence[Product]) -> list[ScoredProduct]:
+        """Stage — 打分(keyword_2gram): sparse bigram dot, dropping non-overlapping products."""
+        vectorizer = LexicalVectorizer().fit([product_text(product) for product in products])
+        query_sparse = vectorizer.encode(query_text)
+        result: list[ScoredProduct] = []
+        for product in products:
+            dot = sparse_dot(query_sparse, vectorizer.encode(product_text(product)))
+            if dot > 0:
+                result.append((product, dot))
+        return result
 
     @staticmethod
     def sort(scored: Sequence[ScoredProduct]) -> list[ScoredProduct]:
-        """Stage 3 — 排序: descending score; product_id breaks ties deterministically."""
+        """Ordering helper: score descending, product_id breaks ties."""
         return sorted(scored, key=lambda item: (-item[1], item[0].product_id))
 
     @staticmethod
+    def filter(spec: ProductSearchSpec, scored: Sequence[ScoredProduct]) -> list[ScoredProduct]:
+        """Stage — 过滤: drop candidates that fail any hard constraint."""
+        return [(product, score) for product, score in scored if matches(product, spec)]
+
+    def rerank(
+        self, query_text: str, scored: Sequence[ScoredProduct]
+    ) -> tuple[list[ScoredProduct], RerankStatus]:
+        """Stage — 精排: re-score the top candidates; reports what the stage did."""
+        return apply_rerank(self._reranker, query_text, scored, self._rerank_top_k)
+
+    @staticmethod
     def dedupe(spec: ProductSearchSpec, scored: Sequence[ScoredProduct]) -> list[ScoredProduct]:
-        """Stage 4 — 去重: keep one lowest-price product per canonical id."""
+        """Stage — 去重: keep one lowest-price product per canonical id."""
         return dedupe_by_canonical(scored, spec)
 
     @staticmethod
     def truncate(sorted_: Sequence[ScoredProduct], limit: int) -> list[ScoredProduct]:
-        """Stage 5 — 截断: keep only the top ``limit``."""
+        """Stage — 截断: keep only the top ``limit``."""
         return list(sorted_[:limit])
 
     @staticmethod
     def assemble(scored: Sequence[ScoredProduct]) -> list[SearchHit]:
-        """Stage 6 — 组装: build the final result objects."""
+        """Stage — 组装: build the final result objects."""
         return [
             SearchHit(product=product, score=score, selected_sku=min_sku(product))
             for product, score in scored
         ]
+
+    @staticmethod
+    def exact_lookup(query_text: str, products: Sequence[Product]) -> list[ScoredProduct] | None:
+        """Fast path: return the product whose id equals the query, without embedding."""
+        for product in products:
+            if product.product_id == query_text or any(
+                sku.sku_id == query_text for sku in product.skus
+            ):
+                return [(product, 1.0)]
+        return None
 
     def search(
         self,
@@ -91,19 +136,31 @@ class SearchPipeline:
         limit: int = 10,
         candidate_pool_size: int = DEFAULT_CANDIDATE_POOL_SIZE,
     ) -> SearchResult:
-        """Chain the six stages and report what hard constraints rejected.
+        """Run the fallback chain and report what hard constraints rejected."""
+        start = time.perf_counter()
+        window = max(candidate_pool_size, limit)
 
-        The rejected set mirrors ``QdrantProductSearch``: the top
-        ``candidate_pool_size`` candidates by raw similarity (no filter applied),
-        minus the ones returned as hits, each explained by ``reasons_for``.
-        """
-        scored = self.score(query_text, products)
+        exact = self.exact_lookup(query_text, products)
+        if exact is not None:
+            strategy: RecallStrategy = "exact_id_lookup"
+            ranked = [(product, score) for product, score in exact if matches(product, spec)]
+            unfiltered = exact
+        else:
+            dense = self._score_or_none(query_text, products)
+            if dense is not None:
+                strategy = "embedding"
+                ranked = self.sort(self.filter(spec, dense))
+                unfiltered = self.sort(dense)
+            else:
+                strategy = "keyword_2gram"
+                sparse = self.lexical_score(query_text, products)
+                ranked = self.sort(self.filter(spec, sparse))
+                unfiltered = self.sort(sparse)
 
-        hits = self.assemble(
-            self.truncate(self.dedupe(spec, self.sort(self.filter(spec, scored))), limit)
-        )
+        reranked, rerank_status = self.rerank(query_text, ranked)
+        hits = self.assemble(self.truncate(self.dedupe(spec, reranked), limit))
 
-        pool = self.sort(scored)[: max(candidate_pool_size, limit)]
+        pool = unfiltered[:window]
         returned = {hit.product.product_id for hit in hits}
         filtered_out: list[RejectedCandidate] = []
         reason_counts: dict[str, int] = {}
@@ -127,9 +184,22 @@ class SearchPipeline:
                 category_exists = any(product.category == spec.category for product in products)
             empty_reason = empty_reason_for(spec, category_exists)
 
+        latency_ms = (time.perf_counter() - start) * 1000
         return SearchResult(
             hits=hits,
             filtered_out=filtered_out,
             reason_counts=reason_counts,
             empty_reason=empty_reason,
+            recall_strategy=strategy,
+            diagnostics=SearchDiagnostics(rerank_status=rerank_status, latency_ms=latency_ms),
         )
+
+    def _score_or_none(
+        self, query_text: str, products: Sequence[Product]
+    ) -> list[ScoredProduct] | None:
+        """Dense score, degrading to ``None`` (keyword_2gram) on embedding failure."""
+        try:
+            return self.score(query_text, products)
+        except Exception:  # noqa: BLE001 — degrade rather than fail the search
+            logger.warning("embedding failed; falling back to keyword_2gram", exc_info=True)
+            return None

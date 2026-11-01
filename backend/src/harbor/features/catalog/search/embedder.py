@@ -46,16 +46,20 @@ class OpenAIEmbedder:
         self,
         settings: Settings,
         transport: httpx.BaseTransport | None = None,
+        timeout: float | None = None,
     ) -> None:
         self._base_url = settings.openai_base_url.rstrip("/")
         self._api_key = settings.openai_api_key.get_secret_value()
         self._model = settings.openai_embedding_model
         self._transport = transport
+        self._timeout = (
+            timeout if timeout is not None else settings.openai_embedding_timeout_seconds
+        )
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         payload = {"model": self._model, "input": list(texts)}
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        with httpx.Client(transport=self._transport) as client:
+        with httpx.Client(transport=self._transport, timeout=self._timeout) as client:
             response = client.post(f"{self._base_url}/embeddings", json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()

@@ -7,6 +7,8 @@
   + 真实 catalog `data/catalog-v1.jsonl`（3700 条）
 - 方法：用现有 `SearchPipeline` / `QdrantProductSearch`（`:memory:` Qdrant +
   确定性 `FakeEmbedder`）逐条实测，不联网。所有用例均为**临时脚本**，未写入仓库。
+- 可视化：[output/retrieval-pipeline.html](../../output/retrieval-pipeline.html)
+  （打分 → 过滤 → 排序 → 截断 → 组装 五阶段交互图，悬停商品跨阶段追踪 + 逐条过过滤门）
 
 ## 结果总览
 

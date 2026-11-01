@@ -1,0 +1,405 @@
+<title>S3 检索管线 · 召回→过滤→精排→去重→截断→组装</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --seq: #0E7A6B; --warn: #9A6700;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --seq: #2BBBA4; --warn: #E0A63C;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --seq: #2BBBA4; --warn: #E0A63C;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(48px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; }
+  header { margin-bottom: 20px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 72ch; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.query { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 14px 16px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .flow-step { display: flex; flex-direction: column; align-items: center; min-width: 64px; padding: 2px 8px; }
+  .fidx { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); }
+  .fname { font-size: 14px; font-weight: 600; }
+  .fcount { font-family: "IBM Plex Mono", monospace; font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .flow-link { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--faint); }
+  .farrow { font-size: 18px; line-height: 1; }
+  .floss { font-size: 11px; color: var(--bad); font-family: "IBM Plex Mono", monospace; }
+  .freorder { font-size: 11px; color: var(--accent-ink); font-family: "IBM Plex Mono", monospace; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+
+  .stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 12px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .panel-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .panel-num { font-family: "IBM Plex Mono", monospace; color: var(--accent-ink); font-size: 13px; }
+  .panel-name { font-weight: 600; font-size: 15px; }
+  .panel-job { margin-left: auto; font-size: 12px; color: var(--faint); font-family: "IBM Plex Mono", monospace; }
+  .panel-body { padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+
+  .row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; transition: opacity .12s ease; }
+  .row:focus-visible, .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .id { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+  .id .rk { color: var(--accent-ink); margin-right: 4px; font-weight: 500; }
+  .body { display: flex; flex-direction: column; min-width: 0; }
+  .t { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m { font-size: 11px; color: var(--muted); font-family: "IBM Plex Mono", monospace; }
+  .s { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .snum { font-family: "IBM Plex Mono", monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .bar { width: 60px; height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--seq); border-radius: 3px; }
+  .v { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
+  .v.pass { color: var(--good); background: var(--good-soft); }
+  .v.drop { color: var(--bad); background: var(--bad-soft); }
+  .row.drop { opacity: .55; }
+  .row.drop .t { text-decoration: line-through; text-decoration-color: var(--bad); }
+
+  .cut { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; color: var(--bad); font-size: 11px; font-family: "IBM Plex Mono", monospace; }
+  .cut::before, .cut::after { content: ""; flex: 1; height: 1px; background: var(--bad); opacity: .35; }
+  .subhead { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin: 4px 4px 2px; }
+  .cards { display: flex; flex-direction: column; gap: 6px; }
+  .card { font-family: "IBM Plex Mono", monospace; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--surface-2); }
+  .card .k { color: var(--accent-ink); }
+  .card .str { color: var(--good); }
+  .card .num { color: var(--fg); }
+  .note { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+
+  .mhead { margin: 34px 0 4px; font-size: 19px; font-weight: 700; }
+  .msub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .mech { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .mech-head { display: flex; align-items: baseline; gap: 8px; }
+  .mech-name { font-weight: 600; font-size: 15px; }
+  .mech-q { margin-left: auto; font-size: 12px; color: var(--faint); }
+  .mstep { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+  .mstep .sn { font-family: "IBM Plex Mono", monospace; color: var(--accent-ink); font-weight: 500; }
+  .mono { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .formula { font-family: "IBM Plex Mono", monospace; font-size: 13px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; overflow-x: auto; white-space: nowrap; }
+
+  .gate { display: flex; flex-direction: column; gap: 4px; }
+  .grow { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); }
+  .gpred { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .gtag { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 1px 6px; border-radius: 5px; letter-spacing: .03em; }
+  .gtag.must { background: var(--good-soft); color: var(--good); }
+  .gtag.mustnot { background: var(--bad-soft); color: var(--bad); }
+  .gstat { font-family: "IBM Plex Mono", monospace; font-weight: 500; min-width: 16px; text-align: center; }
+  .grow.ok { border-color: var(--good); background: var(--good-soft); }
+  .grow.ok .gstat { color: var(--good); }
+  .grow.no { border-color: var(--bad); background: var(--bad-soft); }
+  .grow.no .gstat { color: var(--bad); }
+  .gate-hint { font-size: 11px; color: var(--faint); }
+
+  .upgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .upcard { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .upcard h3 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px dashed; letter-spacing: .03em; }
+  .badge.done { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .badge.warn { color: var(--warn); border-color: var(--warn); }
+  .badge.info { color: var(--accent-ink); border-color: var(--accent); }
+  .call { font-family: "IBM Plex Mono", monospace; font-size: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; }
+  .vflow { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .vstep { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  .vstep.drop { border-color: var(--bad); background: var(--bad-soft); }
+  .vstep.fall { border-color: var(--accent); background: var(--surface-2); }
+  .varrow { color: var(--faint); font-size: 15px; line-height: 1; }
+  .vnote { font-size: 12px; color: var(--muted); margin: 0; }
+  .vnote b { color: var(--fg); }
+  .fallrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+  .fallrow .bad { color: var(--bad); font-family: "IBM Plex Mono", monospace; }
+  .fallrow .ok { color: var(--good); font-family: "IBM Plex Mono", monospace; }
+
+  body.tracing .row, body.tracing .card { opacity: .28; }
+  body.tracing .trace { opacity: 1; box-shadow: 0 0 0 2px var(--accent); }
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { gap: 2px; padding: 12px 8px; }
+    .flow-step { min-width: 0; padding: 2px 4px; }
+    .fcount { font-size: 17px; }
+    .farrow { font-size: 15px; }
+    .bar { width: 48px; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .row, .card { transition: none; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Catalog Search · S3</p>
+    <h1>召回 → 过滤 → 精排 → 去重 → 截断 → 组装</h1>
+    <p class="sub">S3 解决「买家说的话和商品标题对不上」：查询「打扫猫毛的机器」是「吸尘器」的同义改写，字面零重叠，只有双塔 embedding 能接住。看 8 件商品流经六段管线——召回选哪条路、谁被硬约束挡下、精排如何重排、同款如何去重。悬停任意商品追踪它在六阶段中的去向。</p>
+    <div class="chips" id="chips"></div>
+
+    <div class="flow" aria-label="管线概览">
+      <div class="flow-step"><span class="fidx">①</span><span class="fname">召回</span><span class="fcount">8</span></div>
+      <div class="flow-link"><span class="farrow">→</span></div>
+      <div class="flow-step"><span class="fidx">②</span><span class="fname">过滤</span><span class="fcount">5</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="floss">−3 被过滤</span></div>
+      <div class="flow-step"><span class="fidx">③</span><span class="fname">精排</span><span class="fcount">5</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="freorder">重排 A2↑A1</span></div>
+      <div class="flow-step"><span class="fidx">④</span><span class="fname">去重</span><span class="fcount">4</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="floss">−1 同款</span></div>
+      <div class="flow-step"><span class="fidx">⑤</span><span class="fname">截断</span><span class="fcount">3</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="floss">−1 被截断</span></div>
+      <div class="flow-step"><span class="fidx">⑥</span><span class="fname">组装</span><span class="fcount">3</span></div>
+    </div>
+    <p class="hint">悬停或键盘聚焦任意商品行 → 同一商品在六阶段中同步高亮，过滤门显示它逐条通过/失败。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="stages" id="stages"></div>
+  <div class="note" id="note"></div>
+
+  <h2 class="mhead">每个阶段在做什么</h2>
+  <p class="msub">机制拆解 —— 召回怎么选路、过滤条件是什么、精排如何打分、去重按什么规则。</p>
+  <div class="stages" id="mechs"></div>
+
+  <h2 class="mhead">召回决策与降级</h2>
+  <p class="msub">召回是「选一条路、报告选了哪条」的降级链，不是融合；每条坏路都有独立的兜底。</p>
+  <div class="upgrid" id="recall"></div>
+</main>
+
+<script>
+  const CHECKS = [
+    { key: "price",    label: "价格",   pred: "min_price ≤ 2000",      clause: "must" },
+    { key: "weight",   label: "重量",   pred: "weight_kg ≤ 1.5",       clause: "must" },
+    { key: "category", label: "类目",   pred: 'category == "家用电器"', clause: "must" },
+  ];
+
+  // embed = 双塔 embedding 相似分；rerank = cross-encoder 精排分。
+  const PRODUCTS = [
+    { id: "A1", title: "无线吸尘器 标准版",  canonical: "CAN-X", embed: 0.90, rerank: 0.85, price: "¥1200", weight: "1.2kg", category: "家用电器", checks: [1,1,1] },
+    { id: "A2", title: "无线吸尘器 促销版",  canonical: "CAN-X", embed: 0.88, rerank: 0.92, price: "¥800",  weight: "1.2kg", category: "家用电器", checks: [1,1,1] },
+    { id: "B1", title: "便携无线吸尘器",      canonical: "CAN-B", embed: 0.80, rerank: 0.70, price: "¥1500", weight: "1.0kg", category: "家用电器", checks: [1,1,1] },
+    { id: "C1", title: "旗舰吸尘器 大吸力",   canonical: "CAN-C", embed: 0.75, rerank: 0.60, price: "¥4000", weight: "1.0kg", category: "家用电器", checks: [0,1,1] },
+    { id: "D1", title: "强力工业吸尘器",      canonical: "CAN-D", embed: 0.70, rerank: 0.55, price: "¥900",  weight: "6.0kg", category: "家用电器", checks: [1,0,1] },
+    { id: "E1", title: "宠物出行包 猫包",     canonical: "CAN-E", embed: 0.55, rerank: 0.40, price: "¥500",  weight: "0.8kg", category: "母婴宠物", checks: [1,1,0] },
+    { id: "F1", title: "北欧台灯",            canonical: "CAN-F", embed: 0.50, rerank: 0.30, price: "¥300",  weight: "1.0kg", category: "家用电器", checks: [1,1,1] },
+    { id: "G1", title: "静音加湿器",          canonical: "CAN-G", embed: 0.45, rerank: 0.25, price: "¥200",  weight: "0.5kg", category: "家用电器", checks: [1,1,1] },
+  ];
+
+  const QUERY = "打扫猫毛的机器";   // 同义改写 —— 字面与「吸尘器」零重叠
+  const RECALL_STRATEGY = "embedding";
+  const RERANK_STATUS = "success";
+  const LATENCY = "95 ms";
+
+  const productsById = Object.fromEntries(PRODUCTS.map(p => [p.id, p]));
+  const reasonsOf = p => CHECKS.filter((c, i) => !p.checks[i]).map(c => c.label);
+  const passOf = p => reasonsOf(p).length === 0;
+  const byEmbed = (a, b) => (b.embed - a.embed) || (a.id < b.id ? -1 : 1);
+  const byRerank = (a, b) => (b.rerank - a.rerank) || (a.id < b.id ? -1 : 1);
+
+  // Stage ① 召回：embedding 打分，8 条全量。
+  const recalled = [...PRODUCTS].sort(byEmbed);
+  // Stage ② 过滤：硬约束，5 幸存 + 3 拒绝。
+  const survivors = PRODUCTS.filter(passOf).sort(byEmbed);
+  const rejected = PRODUCTS.filter(p => !passOf(p)).sort(byEmbed);
+  // Stage ③ 精排：cross-encoder 重排 5 条（A2 反超 A1）。
+  const reranked = [...survivors].sort(byRerank);
+  // Stage ④ 去重：CAN-X 同款留最低价 A2，丢 A1。
+  const seen = new Set();
+  const deduped = reranked.filter(p => { if (seen.has(p.canonical)) return false; seen.add(p.canonical); return true; });
+  const dups = reranked.filter(p => deduped.every(d => d.id !== p.id));
+  // Stage ⑤ 截断：limit=3。
+  const kept = deduped.slice(0, 3);
+  const cut = deduped.slice(3);
+
+  function bar(score) {
+    return `<span class="s"><span class="snum">${score.toFixed(2)}</span>` +
+      `<span class="bar"><i style="width:${(score * 100).toFixed(1)}%"></i></span></span>`;
+  }
+  function row(p, score, rank) {
+    const rk = rank != null ? `<span class="rk">${rank}</span>` : "";
+    return `<div class="row" data-pid="${p.id}" tabindex="0">` +
+      `<span class="id">${rk}${p.id}</span>` +
+      `<span class="body"><span class="t">${p.title}</span><span class="m">${p.weight} · ${p.price} · ${p.canonical}</span></span>` +
+      bar(score) + `</div>`;
+  }
+  function verdictRow(p, score) {
+    const v = passOf(p)
+      ? `<span class="v pass">✓ 通过</span>`
+      : `<span class="v drop">✗ ${reasonsOf(p).join(" · ")}</span>`;
+    return `<div class="row ${passOf(p) ? "" : "drop"}" data-pid="${p.id}" tabindex="0">` +
+      `<span class="id">${p.id}</span>` +
+      `<span class="body"><span class="t">${p.title}</span><span class="m">${p.weight} · ${p.price}</span></span>` +
+      `<span class="s">${v}</span></div>`;
+  }
+
+  const stages = [
+    { n: "①", name: "召回", job: "recall · 8 · embedding",
+      body: recalled.map(p => row(p, p.embed)).join("") },
+    { n: "②", name: "过滤", job: "filter · 5",
+      body: survivors.map(p => verdictRow(p, p.embed)).join("") +
+        `<div class="subhead">被硬约束挡下 · ${rejected.length}</div>` +
+        rejected.map(p => verdictRow(p, p.embed)).join("") },
+    { n: "③", name: "精排", job: "rerank · 5",
+      body: reranked.map((p, i) => row(p, p.rerank, i + 1)).join("") },
+    { n: "④", name: "去重", job: "dedupe · 4",
+      body: deduped.map((p, i) => row(p, p.rerank, i + 1)).join("") +
+        `<div class="cut">去重线 · 丢弃 ${dups.length} 条（同款留最低价）</div>` +
+        dups.map((p, i) => `<div class="row drop" data-pid="${p.id}" tabindex="0">` +
+          `<span class="id">${p.id}</span>` +
+          `<span class="body"><span class="t">${p.title}</span><span class="m">同款 ${p.canonical} · 价更高被去重</span></span>` +
+          `<span class="s"><span class="v drop">✗ 同款</span></span></div>`).join("") },
+    { n: "⑤", name: "截断", job: "truncate · 3",
+      body: kept.map((p, i) => row(p, p.rerank, i + 1)).join("") +
+        `<div class="cut">截断线 · 丢弃 ${cut.length} 条</div>` +
+        cut.map((p, i) => row(p, p.rerank, i + 4)).join("") },
+    { n: "⑥", name: "组装", job: "assemble · 3",
+      body: `<div class="cards">` + kept.map(p =>
+        `<div class="card" data-pid="${p.id}" tabindex="0"><span class="k">SearchHit(</span>` +
+        `product=<span class="str">"${p.title}"</span>, score=<span class="num">${p.rerank.toFixed(2)}</span><span class="k">)</span></div>`
+      ).join("") + `</div>` },
+  ];
+
+  document.getElementById("chips").innerHTML = [
+    [`query`, `query = "${QUERY}"（同义改写）`],
+    ["good", `recall_strategy = ${RECALL_STRATEGY}`],
+    ["good", `rerank_status = ${RERANK_STATUS}`],
+    [null, `latency = ${LATENCY}`],
+    [null, "类目 = 家用电器"], [null, "价格 ≤ ¥2000"], [null, "重量 ≤ 1.5kg"],
+  ].map(([kind, text]) => `<span class="chip ${kind || ""}">${text}</span>`).join("");
+
+  document.getElementById("stages").innerHTML = stages.map(s =>
+    `<section class="panel"><div class="panel-head">` +
+    `<span class="panel-num">${s.n}</span><span class="panel-name">${s.name}</span>` +
+    `<span class="panel-job">${s.job}</span></div><div class="panel-body">${s.body}</div></section>`).join("");
+
+  document.getElementById("note").innerHTML =
+    `<b>本页的 S3 语义：</b>` +
+    `查询「${QUERY}」与标题「吸尘器」<b>字面零重叠</b>（字符 bigram 也接不住），` +
+    `只有 ① 双塔 embedding 的语义相似能把它排到第一——这正是 S3 解决的根本问题。` +
+    `③ 精排（cross-encoder）把「促销版」A2 反超「标准版」A1（0.92 &gt; 0.85）；` +
+    `④ 去重把同款 CAN-X 的两条压成一条，留最低价 A2。` +
+    `<b>召回是降级链不是融合</b>：默认 embedding，挂了退 keyword_2gram，查 sku_id 走 exact_id_lookup（零 embedding）。`;
+
+  /* ---- mechanism cards ---- */
+  const mechHTML = [
+    `<section class="mech"><div class="mech-head"><span class="panel-num">①</span>` +
+      `<span class="mech-name">召回</span><span class="mech-q">走哪条路？</span></div>` +
+      `<div class="formula">exact_id_lookup → embedding → keyword_2gram</div>` +
+      `<div class="mstep"><span class="sn">1</span><span>查询若是已知 <span class="mono">product_id / sku_id</span> → 直接命中，<b>零 embedding 调用</b>（<span class="mono">recall_strategy=exact_id_lookup</span>）。</span></div>` +
+      `<div class="mstep"><span class="sn">2</span><span>否则走双塔 embedding（<span class="mono">text-embedding-v4</span>，1024 维）——查询向量与商品向量余弦相似。</span></div>` +
+      `<div class="mstep"><span class="sn">3</span><span>embedding 抛异常/超时 → 降级字符 bigram（<span class="mono">keyword_2gram</span>），字面重叠兜底。</span></div>` +
+      `<div class="mstep"><span class="sn">·</span><span>本页查询不是 id、embedding 正常，故 <span class="mono">recall_strategy = "embedding"</span>，8 条全量召回。</span></div></section>`,
+
+    `<section class="mech"><div class="mech-head"><span class="panel-num">②</span>` +
+      `<span class="mech-name">过滤</span><span class="mech-q">硬约束是什么？</span></div>` +
+      `<div class="mstep"><span class="sn">·</span><span>3 条硬约束 <b>AND</b> 关系——任一条失败即丢弃，对应 Qdrant <span class="mono">filter</span> 的 <span class="mono">must</span> 子句。</span></div>` +
+      `<div class="gate" id="gate">` +
+      CHECKS.map(c => `<div class="grow" data-check="${c.key}">` +
+        `<span class="gpred">${c.pred}</span>` +
+        `<span class="gtag must">${c.clause}</span>` +
+        `<span class="gstat"></span></div>`).join("") + `</div>` +
+      `<div class="gate-hint">悬停任意商品，查看它逐条 ✓/✗；「价格」取多 SKU 最低价，预算比较前按币种换算（S2-6）。</div></section>`,
+
+    `<section class="mech"><div class="mech-head"><span class="panel-num">③</span>` +
+      `<span class="mech-name">精排</span><span class="mech-q">为什么能重排？</span></div>` +
+      `<div class="formula">rerank = cross_encoder(query, product_text)  只重排 top-K，不决定命中</div>` +
+      `<div class="mstep"><span class="sn">1</span><span>双塔 embedding 是「各算各的向量再比」；cross-encoder 把 <b>query 与候选拼成一对</b>进同一模型打分，语义更细。</span></div>` +
+      `<div class="mstep"><span class="sn">2</span><span>只对余弦 top-K（默认 <span class="mono">search_rerank_top_k=30</span>）打分，不对全量。</span></div>` +
+      `<div class="mstep"><span class="sn">3</span><span>本页把 A2（促销版 0.92）排到 A1（标准版 0.85）之前——精排<b>只重排、不掉候选</b>；失败则保留召回序，<span class="mono">rerank_status=failed</span>。</span></div></section>`,
+
+    `<section class="mech"><div class="mech-head"><span class="panel-num">④</span>` +
+      `<span class="mech-name">去重</span><span class="mech-q">按什么规则？</span></div>` +
+      `<div class="formula">每组 canonical_product_id 留「换算到目标币种后最低价」的一条</div>` +
+      `<div class="mstep"><span class="sn">·</span><span>同款（同一真实商品跨平台/跨语言副本）只出现一次；A1（¥1200）与 A2（¥800）同属 <span class="mono">CAN-X</span>，留 A2。</span></div>` +
+      `<div class="mstep"><span class="sn">·</span><span>去重发生在精排之后、截断之前，不浪费 <span class="mono">limit</span> 名额在重复款上。</span></div></section>`,
+
+    `<section class="mech"><div class="mech-head"><span class="panel-num">⑤</span>` +
+      `<span class="mech-name">截断</span><span class="mech-q">原理是什么？</span></div>` +
+      `<div class="formula">deduped[:3]   ← 取前 3 个，其余丢弃</div>` +
+      `<div class="mstep"><span class="sn">·</span><span>精排+去重后取前 <span class="mono">limit=3</span>；G1 排第 4 被截断。</span></div></section>`,
+
+    `<section class="mech"><div class="mech-head"><span class="panel-num">⑥</span>` +
+      `<span class="mech-name">组装</span><span class="mech-q">结果长什么样？</span></div>` +
+      `<div class="mstep"><span class="sn">1</span><span>每个保留项映射为 <span class="mono">SearchHit(product=…, score=…, selected_sku=最低价SKU)</span>。</span></div>` +
+      `<div class="formula">SearchResult = (hits, filtered_out, reason_counts, empty_reason, recall_strategy, diagnostics)</div>` +
+      `<div class="mstep"><span class="sn">·</span><span><span class="mono">diagnostics</span> 带 <span class="mono">rerank_status</span> + <span class="mono">latency_ms</span>——这是 S3 的可观测出口。</span></div></section>`,
+  ].join("");
+  document.getElementById("mechs").innerHTML = mechHTML;
+
+  /* ---- recall decision & degradation ---- */
+  document.getElementById("recall").innerHTML = [
+    `<section class="upcard"><h3>三条召回路径 <span class="badge done">已实现</span></h3>` +
+      `<div class="vflow">` +
+      `<div class="vstep"><b>exact_id_lookup</b> —— 查询是 product_id / sku_id<br><span class="mono">recall_strategy=exact_id_lookup · embedding 零调用</span></div>` +
+      `<span class="varrow">↓ 不是 id</span>` +
+      `<div class="vstep"><b>embedding</b> —— 双塔语义召回（主路径）<br><span class="mono">text-embedding-v4 · 1024 维 · recall_strategy=embedding</span></div>` +
+      `<span class="varrow">↓ embedding 失败/超时</span>` +
+      `<div class="vstep fall"><b>keyword_2gram</b> —— CJK 字符 bigram 兜底<br><span class="mono">recall_strategy=keyword_2gram</span></div>` +
+      `</div></section>`,
+
+    `<section class="upcard"><h3>降级矩阵 <span class="badge info">每层独立降，不挂死</span></h3>` +
+      `<div class="fallrow"><span>embedding 地址改错 / 服务超时</span><span class="ok">→ keyword_2gram，仍有结果</span></div>` +
+      `<div class="fallrow"><span>精排（cross-encoder）失败</span><span class="ok">→ 保留召回序，rerank_status=failed</span></div>` +
+      `<div class="fallrow"><span>embedding 超时预算</span><span class="ok">→ httpx timeout（默认 5s），整体 ≤ timeout+1s</span></div>` +
+      `<div class="fallrow"><span>空索引启动</span><span class="ok">→ ensure_indexed 自动 bootstrap</span></div>` +
+      `<p class="vnote">「精排降级」的字面语义：精排是<b>可选增强层</b>，挂了不影响召回与硬约束，只是少了精排那一档质量。</p></section>`,
+
+    `<section class="upcard"><h3>可观测 <span class="badge done">已实现</span></h3>` +
+      `<div class="call">SearchResult(
+  hits          = [A2, B1, F1],
+  filtered_out  = [C1(价格), D1(重量), E1(类目)],
+  reason_counts = {price:1, weight:1, category:1},
+  recall_strategy = "embedding",
+  diagnostics  = { rerank_status: "success", latency_ms: 95 },
+)</div>` +
+      `<p class="vnote">调用方能看到：走了哪条召回、精排成没成、多慢——这三项是 S3 在 S2 之上新增的<b>可观测契约</b>。</p></section>`,
+  ].join("");
+
+  /* ---- trace: hover highlights same product + updates the filter gate ---- */
+  const nodes = [...document.querySelectorAll("[data-pid]")];
+  const gateRows = [...document.querySelectorAll("#gate .grow")];
+  function updateGate(pid) {
+    const p = pid ? productsById[pid] : null;
+    gateRows.forEach(g => {
+      const idx = CHECKS.findIndex(c => c.key === g.dataset.check);
+      const st = g.querySelector(".gstat");
+      g.classList.remove("ok", "no");
+      if (!p) { st.textContent = ""; return; }
+      const ok = p.checks[idx] === 1;
+      st.textContent = ok ? "✓" : "✗";
+      g.classList.toggle(ok ? "ok" : "no", true);
+    });
+  }
+  function setTrace(pid) {
+    nodes.forEach(x => x.classList.toggle("trace", x.dataset.pid === pid));
+    updateGate(pid);
+  }
+  nodes.forEach(n => {
+    n.addEventListener("mouseenter", () => { document.body.classList.add("tracing"); setTrace(n.dataset.pid); });
+    n.addEventListener("mouseleave", () => { document.body.classList.remove("tracing"); nodes.forEach(x => x.classList.remove("trace")); updateGate(null); });
+    n.addEventListener("focus", () => { document.body.classList.add("tracing"); setTrace(n.dataset.pid); });
+    n.addEventListener("blur", () => { document.body.classList.remove("tracing"); nodes.forEach(x => x.classList.remove("trace")); updateGate(null); });
+  });
+</script>

@@ -40,11 +40,18 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_MODEL", "HARBOR_OPENAI_MODEL"),
     )
     openai_embedding_model: str = Field(
-        default="text-embedding-3-small",
+        default="text-embedding-v4",
         validation_alias=AliasChoices("OPENAI_EMBEDDING_MODEL", "HARBOR_OPENAI_EMBEDDING_MODEL"),
     )
+    # Hard ceiling on the embedding HTTP call (S3-6): when the vector service
+    # hangs, the search falls back to keyword_2gram within this budget.
+    openai_embedding_timeout_seconds: float = Field(default=5.0, gt=0)
     # Unfiltered semantic window used to report rejected candidates (S2-2).
     search_candidate_pool_size: int = Field(default=100, ge=1)
+    # S3: cross-encoder rerank (optional quality layer).
+    search_rerank_enabled: bool = Field(default=True)
+    search_rerank_model: str = Field(default="BAAI/bge-reranker-base")
+    search_rerank_top_k: int = Field(default=30, ge=1)
 
     @property
     def is_development(self) -> bool:

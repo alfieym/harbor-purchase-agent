@@ -49,3 +49,12 @@ def test_openai_embedder_raises_on_http_error(monkeypatch: pytest.MonkeyPatch) -
 
     with pytest.raises(httpx.HTTPStatusError):
         embedder.embed(["a"])
+
+
+def test_openai_embedder_applies_explicit_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://example.com/v1")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    embedder = OpenAIEmbedder(Settings(_env_file=None), timeout=0.25)
+
+    assert embedder._timeout == 0.25
