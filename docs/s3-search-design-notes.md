@@ -2,7 +2,7 @@
 
 > 记录 S3（语义召回 + 精排 + 容错）落地过程中的几个关键概念辨析与设计原则，供后续回顾。
 > 相关：验收报告 [2026-11-01-s3-acceptance-report.md](_build_log/2026-11-01-s3-acceptance-report.md)、
-> 交互图 [output/s3-pipeline.html](../output/s3-pipeline.html)、
+> 交互图 [_pipeline_html/s3-pipeline.html](_pipeline_html/s3-pipeline.html)、
 > 完整流程脚本 [backend/scripts/verify_s3_full.py](../backend/scripts/verify_s3_full.py)。
 
 ## 一、四个核心概念辨析（Q&A）

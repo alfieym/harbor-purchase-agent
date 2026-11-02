@@ -58,3 +58,29 @@ def test_openai_embedder_applies_explicit_timeout(monkeypatch: pytest.MonkeyPatc
     embedder = OpenAIEmbedder(Settings(_env_file=None), timeout=0.25)
 
     assert embedder._timeout == 0.25
+
+
+def test_openai_embedder_chunks_inputs_by_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://example.com/v1")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    batches: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        inputs = json.loads(request.content)["input"]
+        batches.append(len(inputs))
+        return httpx.Response(
+            200,
+            json={"data": [{"index": i, "embedding": [float(i), 0.0]} for i in range(len(inputs))]},
+        )
+
+    embedder = OpenAIEmbedder(
+        Settings(_env_file=None), transport=httpx.MockTransport(handler), batch_size=10
+    )
+
+    vectors = embedder.embed([f"t{i}" for i in range(25)])
+
+    assert batches == [10, 10, 5]
+    assert len(vectors) == 25
+    assert vectors[0] == [0.0, 0.0]
+    assert vectors[24] == [4.0, 0.0]
+    assert embedder.embed([]) == []

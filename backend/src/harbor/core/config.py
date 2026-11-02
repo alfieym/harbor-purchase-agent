@@ -4,6 +4,9 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
 
 class Settings(BaseSettings):
     """Application configuration loaded from HARBOR_* and OPENAI_* env vars."""
@@ -27,8 +30,16 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
     )
 
+    # Chat provider: "deepseek" or "dashscope" (Alibaba Cloud Bailian / Qwen).
+    # Only picks the client class; OPENAI_BASE_URL / OPENAI_MODEL still decide
+    # the endpoint and model name.
+    model_provider: Literal["deepseek", "dashscope"] = Field(
+        default="deepseek",
+        validation_alias=AliasChoices("HARBOR_MODEL_PROVIDER", "MODEL_PROVIDER"),
+    )
+
     openai_base_url: str = Field(
-        default="https://api.deepseek.com",
+        default=DEEPSEEK_BASE_URL,
         validation_alias=AliasChoices("OPENAI_BASE_URL", "HARBOR_OPENAI_BASE_URL"),
     )
     openai_api_key: SecretStr = Field(
@@ -40,8 +51,18 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_MODEL", "HARBOR_OPENAI_MODEL"),
     )
     openai_embedding_model: str = Field(
-        default="text-embedding-v4",
+        default="qwen3.7-text-embedding-flash",
         validation_alias=AliasChoices("OPENAI_EMBEDDING_MODEL", "HARBOR_OPENAI_EMBEDDING_MODEL"),
+    )
+    # Provider-side inputs per /embeddings request. DashScope's
+    # qwen3.7-text-embedding-flash accepts at most 20 texts per call, so index
+    # builds are chunked. (text-embedding-v4 accepts 10 — lower this if you switch.)
+    openai_embedding_batch_size: int = Field(
+        default=20,
+        ge=1,
+        validation_alias=AliasChoices(
+            "OPENAI_EMBEDDING_BATCH_SIZE", "HARBOR_OPENAI_EMBEDDING_BATCH_SIZE"
+        ),
     )
     # Hard ceiling on the embedding HTTP call (S3-6): when the vector service
     # hangs, the search falls back to keyword_2gram within this budget.

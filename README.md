@@ -70,9 +70,18 @@ make dev-web   # http://localhost:5173
 | `HARBOR_PORT` | `8010` | 监听端口 |
 | `HARBOR_LOG_LEVEL` | `INFO` | 日志级别 |
 | `HARBOR_CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | JSON 数组 |
-| `OPENAI_BASE_URL` | `https://api.deepseek.com` | OpenAI 兼容端点 |
-| `OPENAI_API_KEY` | 空 | 模型 key，Phase 1 不调用 |
-| `OPENAI_MODEL` | `deepseek-chat` | 模型名，Phase 1 不调用 |
+| `HARBOR_MODEL_PROVIDER` | `deepseek` | `deepseek` / `dashscope`（千问） |
+| `OPENAI_BASE_URL` | `https://api.deepseek.com` | OpenAI 兼容端点；千问用 `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `OPENAI_API_KEY` | 空 | 模型 key |
+| `OPENAI_MODEL` | `deepseek-chat` | 模型名；千问用 `qwen-plus` |
+| `OPENAI_EMBEDDING_MODEL` | `qwen3.7-text-embedding-flash` | 向量模型（需端点支持 `/embeddings`） |
+| `OPENAI_EMBEDDING_BATCH_SIZE` | `20` | 单次 embedding 请求的文本条数（flash 上限 20，`text-embedding-v4` 上限 10） |
+
+切换千问（阿里云百炼）：`HARBOR_MODEL_PROVIDER=dashscope`、
+`OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、
+`OPENAI_MODEL=qwen-plus`，三处一起改。DashScope 的 compatible-mode 同时提供
+`/embeddings`，语义召回可直接跑通；DeepSeek 端点没有 `/embeddings`，检索会降级为
+`keyword_2gram`。
 
 `OPENAI_*` 也兼容 `HARBOR_OPENAI_*` 写法。key 使用 `SecretStr` 保存，
 健康检查只暴露 `llm_configured`，不会返回 key。`backend/.env` 已被 git 忽略。

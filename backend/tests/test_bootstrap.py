@@ -29,6 +29,13 @@ class FakeEmbedder:
         return vectors
 
 
+class FailingEmbedder:
+    """Embedding always fails, forcing the keyword_2gram fallback."""
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        raise RuntimeError("embedding down")
+
+
 def _product(product_id: str, title: str) -> Product:
     return Product(
         product_id=product_id,
@@ -77,3 +84,35 @@ def test_empty_index_is_bootstrapped_on_demand() -> None:
 
     # A second call is a no-op: the index is already populated.
     assert indexer.ensure_indexed(products) is False
+
+
+def test_reused_index_still_fits_sparse_vectorizer() -> None:
+    """Reusing a populated index must fit the lexical vectorizer (S4 cache reuse).
+
+    A fresh ``LexicalVectorizer`` handed to a no-op ``ensure_indexed`` must still
+    learn the corpus vocab: the sparse vectors are persisted in Qdrant, but the
+    term→index map lives only in memory. Without re-fitting, the keyword_2gram
+    fallback encodes queries to an empty vocab and silently returns nothing.
+    """
+    client = QdrantClient(":memory:")
+    embedder = FakeEmbedder()
+    products = [_product("P1", "吸尘器")]
+
+    # Build once with one vectorizer instance.
+    QdrantProductIndexer(client, embedder, vectorizer=LexicalVectorizer()).ensure_indexed(products)
+
+    # A fresh service reuses the collection with a NEW vectorizer (the CLI/verify
+    # cache-reuse path).
+    fresh_vectorizer = LexicalVectorizer()
+    fresh_indexer = QdrantProductIndexer(client, embedder, vectorizer=fresh_vectorizer)
+    assert fresh_indexer.ensure_indexed(products) is False  # no dense rebuild
+
+    # The fresh vectorizer must be fitted so the keyword_2gram fallback still works.
+    indices, _ = fresh_vectorizer.encode("吸尘器")
+    assert indices, "reused index left the lexical vectorizer unfitted"
+
+    result = QdrantProductSearch(client, FailingEmbedder(), vectorizer=fresh_vectorizer).search(
+        "吸尘器", ProductSearchSpec(category="家用电器"), limit=10
+    )
+    assert [hit.product.product_id for hit in result.hits] == ["P1"]
+    assert result.recall_strategy == "keyword_2gram"

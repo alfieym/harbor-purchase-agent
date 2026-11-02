@@ -5,7 +5,7 @@
 - 基线：`make test` → **126 passed**（S2 封板时 108，净增 18）；`make lint` / `make typecheck` 全绿
 - 数据：真实 catalog `data/catalog-v1.jsonl`（3700 条）+ 测试 fixture
 - 方法：`:memory:` Qdrant + 确定性 `FakeEmbedder` 逐条实测；精排用真实 `FastembedReranker`（fastembed ONNX，无 torch）
-- 可视化：[output/s3-pipeline.html](../../output/s3-pipeline.html)
+- 可视化：[s3-pipeline.html](../_pipeline_html/s3-pipeline.html)
   （召回 → 过滤 → 精排 → 去重 → 截断 → 组装 六阶段交互图，含召回决策降级链、降级矩阵与可观测）
 
 ## 关键架构变更（本章开头做出的转向）

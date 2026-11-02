@@ -158,7 +158,8 @@ class SearchPipeline:
                 unfiltered = self.sort(sparse)
 
         reranked, rerank_status = self.rerank(query_text, ranked)
-        hits = self.assemble(self.truncate(self.dedupe(spec, reranked), limit))
+        deduped = self.dedupe(spec, reranked)
+        hits = self.assemble(self.truncate(deduped, limit))
 
         pool = unfiltered[:window]
         returned = {hit.product.product_id for hit in hits}
@@ -187,6 +188,7 @@ class SearchPipeline:
         latency_ms = (time.perf_counter() - start) * 1000
         return SearchResult(
             hits=hits,
+            total=len(deduped),
             filtered_out=filtered_out,
             reason_counts=reason_counts,
             empty_reason=empty_reason,

@@ -9,7 +9,7 @@ export UV_DEFAULT_INDEX ?= https://mirrors.aliyun.com/pypi/simple
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup dev dev-api dev-web test lint format typecheck gen-api check clean distclean
+.PHONY: help setup dev dev-api dev-web cli test lint format typecheck gen-api check clean distclean
 
 help:
 	@printf '%s\n' \
@@ -19,6 +19,7 @@ help:
 	  '  dev        并行启动后端 (8010) 与前端 (5173)' \
 	  '  dev-api    仅启动后端（自动重载）' \
 	  '  dev-web    仅启动前端' \
+	  '  cli        启动采购助手交互式 REPL（S4）' \
 	  '  test       运行后端测试' \
 	  '  lint       检查 Python 代码风格与格式' \
 	  '  format     自动修复 Python 风格并格式化' \
@@ -43,6 +44,9 @@ dev-api:
 dev-web:
 	$(WEB) run dev
 
+cli:
+	$(PY) python -m harbor.agents
+
 test:
 	$(PY) pytest -q
 
@@ -66,7 +70,7 @@ check: lint typecheck test
 
 clean:
 	find backend -type d -name __pycache__ -prune -exec rm -rf {} +
-	rm -rf backend/.pytest_cache backend/.ruff_cache backend/.mypy_cache frontend/dist
+	rm -rf backend/.pytest_cache backend/.ruff_cache backend/.mypy_cache frontend/dist .cache
 	@echo "已清理缓存与构建产物。"
 
 distclean: clean

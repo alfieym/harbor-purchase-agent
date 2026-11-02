@@ -81,8 +81,13 @@ class QdrantProductIndexer:
     def ensure_indexed(self, products: Sequence[Product]) -> bool:
         """Index ``products`` only if the collection is missing or empty (S3-5).
 
+        The sparse vocab is fitted unconditionally: it is cheap and local (bigram
+        counting), and the query-side ``keyword_2gram`` fallback needs it even when
+        the dense index is reused from disk (``recreate`` refits it idempotently).
+
         Returns True when an index was (re)built, False when it was already populated.
         """
+        self._vectorizer.fit([product_text(product) for product in products])
         if self._client.collection_exists(self._collection_name) and self._count() > 0:
             return False
         self.recreate(products)

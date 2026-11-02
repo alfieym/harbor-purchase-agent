@@ -47,6 +47,7 @@ class OpenAIEmbedder:
         settings: Settings,
         transport: httpx.BaseTransport | None = None,
         timeout: float | None = None,
+        batch_size: int | None = None,
     ) -> None:
         self._base_url = settings.openai_base_url.rstrip("/")
         self._api_key = settings.openai_api_key.get_secret_value()
@@ -55,9 +56,19 @@ class OpenAIEmbedder:
         self._timeout = (
             timeout if timeout is not None else settings.openai_embedding_timeout_seconds
         )
+        self._batch_size = (
+            batch_size if batch_size is not None else settings.openai_embedding_batch_size
+        )
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        payload = {"model": self._model, "input": list(texts)}
+        """Embed ``texts`` in provider-sized batches, preserving input order."""
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), self._batch_size):
+            vectors.extend(self._embed_batch(list(texts[start : start + self._batch_size])))
+        return vectors
+
+    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
+        payload = {"model": self._model, "input": texts}
         headers = {"Authorization": f"Bearer {self._api_key}"}
         with httpx.Client(transport=self._transport, timeout=self._timeout) as client:
             response = client.post(f"{self._base_url}/embeddings", json=payload, headers=headers)

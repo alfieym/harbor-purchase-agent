@@ -65,6 +65,9 @@ class SearchResult(BaseModel):
     """Hits plus the candidates that hard constraints rejected and runtime diagnostics."""
 
     hits: list[SearchHit]
+    # Post-dedupe count before ``limit`` truncation, so callers can report
+    # "命中 N 条、展示前 M 条" without a second query (S4-3).
+    total: int = 0
     filtered_out: list[RejectedCandidate] = Field(default_factory=list)
     reason_counts: dict[str, int] = Field(default_factory=dict)
     empty_reason: str | None = None

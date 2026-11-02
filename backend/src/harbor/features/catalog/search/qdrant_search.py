@@ -116,8 +116,11 @@ class QdrantProductSearch:
         """Embed the query, degrading to ``None`` (keyword_2gram) on failure or timeout."""
         try:
             return self._embedder.embed([query_text])[0]
-        except Exception:  # noqa: BLE001 — degrade rather than fail the search
-            logger.warning("embedding failed; falling back to keyword_2gram", exc_info=True)
+        except Exception as exc:  # noqa: BLE001 — degrade rather than fail the search
+            logger.warning(
+                "embedding failed (%s); falling back to keyword_2gram",
+                str(exc).splitlines()[0],
+            )
             return None
 
     def _find_by_id(self, query: str) -> Product | None:
@@ -230,10 +233,10 @@ class QdrantProductSearch:
         reranked, rerank_status = apply_rerank(
             self._reranker, query_text, ranked, self._rerank_top_k
         )
-        deduped = dedupe_by_canonical(reranked, spec)[:limit]
+        deduped_all = dedupe_by_canonical(reranked, spec)
         hits = [
             SearchHit(product=product, score=score, selected_sku=min_sku(product))
-            for product, score in deduped
+            for product, score in deduped_all[:limit]
         ]
 
         returned = {hit.product.product_id for hit in hits}
@@ -249,6 +252,7 @@ class QdrantProductSearch:
         latency_ms = (time.perf_counter() - start) * 1000
         return SearchResult(
             hits=hits,
+            total=len(deduped_all),
             filtered_out=filtered_out,
             reason_counts=reason_counts,
             empty_reason=empty_reason,

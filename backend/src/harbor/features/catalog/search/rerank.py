@@ -69,8 +69,8 @@ def apply_rerank(
         return list(scored), "disabled"
     try:
         scores = reranker.rerank(query, [product_text(product) for product, _ in head])
-    except Exception:  # noqa: BLE001 — degrade rather than fail the search
-        logger.warning("rerank failed; keeping recall order", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — degrade rather than fail the search
+        logger.warning("rerank failed (%s); keeping recall order", str(exc).splitlines()[0])
         return list(scored), "failed"
     reranked = sorted(
         ((product, float(score)) for (product, _), score in zip(head, scores, strict=True)),

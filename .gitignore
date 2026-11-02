@@ -21,3 +21,6 @@ backend/.env
 .DS_Store
 .vscode/
 .idea/
+
+# Local search index cache (Qdrant on-disk)
+.cache/
