@@ -1,7 +1,9 @@
 """S4: the product_search tool wraps S3 search into a model-callable function."""
 
+import asyncio
 import json
 import math
+import threading
 from collections.abc import Sequence
 from datetime import date
 
@@ -78,13 +80,40 @@ def test_tool_returns_model_readable_json() -> None:
     service = CatalogSearchService([_product("P1", "无线吸尘器 轻便", price=100.0)], FakeEmbedder())
     tool = make_product_search_tool(service)
 
-    chunk = tool._func(query="吸尘器", category="家用电器", price_max_major=500.0)  # type: ignore[attr-defined]
+    chunk = asyncio.run(  # type: ignore[attr-defined]
+        tool._func(query="吸尘器", category="家用电器", price_max_major=500.0)
+    )
 
     payload = json.loads(chunk.content[0].text)
     assert payload["recall_strategy"] in ("embedding", "keyword_2gram")
     assert payload["hits"][0]["title"] == "无线吸尘器 轻便"
     assert payload["hits"][0]["price_major"] == 100.0
     assert payload["hits"][0]["selected_sku_id"] == "P1-S1"
+
+
+def test_tool_offloads_search_off_the_event_loop() -> None:
+    """S5-4: the sync search runs in a worker thread, not the event loop.
+
+    If ``service.search`` ran on the loop thread it would block every concurrent
+    request; the tool must hand it to a worker thread so two sessions can search
+    in parallel.
+    """
+    service = CatalogSearchService([_product("P1", "无线吸尘器")], FakeEmbedder())
+    tool = make_product_search_tool(service)
+
+    recorded: list[int] = []
+    original_search = service.search
+
+    def wrapped(query_text, spec, limit=10):
+        recorded.append(threading.get_ident())
+        return original_search(query_text, spec, limit)
+
+    service.search = wrapped  # type: ignore[method-assign]
+
+    asyncio.run(tool._func(query="吸尘器"))  # type: ignore[attr-defined]
+
+    main_tid = threading.get_ident()
+    assert recorded and recorded[0] != main_tid
 
 
 def test_tool_arg_schema_has_expected_fields() -> None:
@@ -132,7 +161,7 @@ def test_tool_converts_price_to_target_currency() -> None:
     service = CatalogSearchService([product], FakeEmbedder())
     tool = make_product_search_tool(service)
 
-    chunk = tool._func(query="饮水器", currency="CNY")  # type: ignore[attr-defined]
+    chunk = asyncio.run(tool._func(query="饮水器", currency="CNY"))  # type: ignore[attr-defined]
     payload = json.loads(chunk.content[0].text)
 
     hit = payload["hits"][0]

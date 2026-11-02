@@ -5,6 +5,7 @@ builds a ``ProductSearchSpec``, calls ``CatalogSearchService.search``, and retur
 the ``SearchResult`` as a compact JSON chunk the model can read.
 """
 
+import asyncio
 import json
 from decimal import Decimal
 
@@ -75,7 +76,7 @@ def _search_result_to_dict(result: SearchResult, target_currency: str) -> dict:
 def make_product_search_tool(service) -> FunctionTool:
     """Build the ``product_search`` tool backed by a ``CatalogSearchService``."""
 
-    def product_search(
+    async def product_search(
         query: str,
         category: str | None = None,
         price_max_major: float | None = None,
@@ -93,7 +94,10 @@ def make_product_search_tool(service) -> FunctionTool:
             weight_max_kg=weight_max_kg,
             excluded_material_tags=list(excluded_material_tags or []),
         )
-        result = service.search(query, spec, limit=10)
+        # ``service.search`` is synchronous (Qdrant + embedding HTTP), so offload
+        # it to a worker thread — otherwise it blocks the event loop and two
+        # concurrent sessions serialize on it (S5-4).
+        result = await asyncio.to_thread(service.search, query, spec, 10)
         return ToolChunk(
             content=[
                 TextBlock(

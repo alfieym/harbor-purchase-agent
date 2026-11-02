@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     search_rerank_enabled: bool = Field(default=True)
     search_rerank_model: str = Field(default="BAAI/bge-reranker-base")
     search_rerank_top_k: int = Field(default=30, ge=1)
+    # Hard ceiling on one model+tool turn (S5-2): when the whole ReAct turn runs
+    # longer than this, the request fails with a structured 504 instead of hanging.
+    turn_timeout_seconds: float = Field(default=120.0, gt=0)
 
     @property
     def is_development(self) -> bool:

@@ -4,6 +4,8 @@
 
 ### `GET /api/health`
 
+> 同时挂在根级 `/health`（S5 验收清单路径）。二者返回相同结构。
+
 响应 `200 application/json`：
 
 | 字段 | 类型 | 说明 |
@@ -13,6 +15,8 @@
 | `version` | string | 应用版本 |
 | `environment` | string | `development` / `test` / `production` |
 | `llm_configured` | boolean | 是否配置了模型 API key；**不返回 key 本身** |
+| `model` | string \| null | 配置的模型名（未配置时为 `null`） |
+| `dependencies` | object | 各依赖状态（`llm` / `catalog` → `ok` / `unconfigured` / `unloaded`） |
 | `time` | string (ISO 8601) | 服务端 UTC 时间 |
 
 示例：
@@ -50,6 +54,25 @@
 - `GET /docs`：Swagger UI。
 - ReDoc 已关闭。
 
+### `POST /commerce/intents`（S5）
+
+一次性 JSON：模型跑一轮 ReAct 检索并返回商品卡。
+
+请求：
+
+```json
+{ "buyer_id": "u1", "shopping_session_id": "s1", "raw_query": "2000 以内的吸尘器" }
+```
+
+响应 `200`：
+
+```json
+{ "final_text": "命中 3 条、展示前 3 条", "cards": [ /* ProductCard... */ ] }
+```
+
+- 会话键为 `(buyer_id, shopping_session_id)`，未见则新建、见过则复用（无 404）。
+- 错误走统一信封：503 未配置 key、504 单轮超时、502 工具失败/无结构化输出。
+
 ## 契约生成链路
 
 ```bash
@@ -66,6 +89,9 @@ make gen-api
 不要手改。修改后端路由/schema 后重新执行 `make gen-api`。
 
 ## SSE 契约（Phase 2 实现，Phase 1 仅文档化）
+
+> 实现时把请求字段与 `POST /commerce/intents` 对齐为
+> `buyer_id` / `shopping_session_id` / `raw_query`（下文仍为早期草案字段名）。
 
 ### 请求
 

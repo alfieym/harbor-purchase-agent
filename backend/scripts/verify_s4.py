@@ -30,7 +30,7 @@ from agentscope.message import UserMsg
 from agentscope.tool import Toolkit
 
 from harbor.agents.cards import ProductCard, ProductCardList
-from harbor.agents.cli import FINGERPRINT_PATH, _open_index
+from harbor.agents.factory import FINGERPRINT_PATH, _open_index
 from harbor.agents.models import build_chat_model
 from harbor.agents.permissions import allow_product_search_tool
 from harbor.agents.prompts import system_prompt_for

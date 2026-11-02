@@ -16,6 +16,16 @@ def test_health_returns_ok(client: TestClient) -> None:
     assert datetime.fromisoformat(body["time"]).tzinfo is not None
 
 
+def test_health_reports_model_and_dependencies(client: TestClient) -> None:
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    # No key configured → no model name, and the LLM dependency is unconfigured.
+    assert body["model"] is None
+    assert body["dependencies"]["llm"] == "unconfigured"
+
+
 def test_unknown_path_returns_error_envelope(client: TestClient) -> None:
     response = client.get("/api/unknown")
 
