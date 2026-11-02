@@ -8,10 +8,11 @@ reply→cards parsing exactly.
 import asyncio
 
 import pytest
-from agentscope.message import Msg, TextBlock, ToolResultState
+from agentscope.message import Msg, TextBlock, ToolResultState, UserMsg
 from agentscope.state import AgentState
 
 from harbor.features.chat.repository import SessionRepository
+from harbor.features.chat.schemas import CommerceIntentResponse
 from harbor.features.chat.service import (
     ModelFailureError,
     ModelTimeoutError,
@@ -79,6 +80,26 @@ class FakeAgent:
         if self._tool_state is not None:
             self.state.context.append(FakeMsg(tool_state=self._tool_state))
         result = FakeMsg(self._output, self._text)
+        self.state.context.append(result)
+        return result
+
+
+class PersistingAgent:
+    """Stub backed by a real ``AgentState``, so ``persist`` can serialize it."""
+
+    def __init__(self, output: dict | None = None, text: str = "") -> None:
+        self.state = AgentState()
+        self._output = output
+        self._text = text
+
+    async def reply(self, msg, structured_schema=None) -> Msg:
+        self.state.context.append(msg)
+        result = Msg(
+            name="purchase_agent",
+            role="assistant",
+            content=[TextBlock(type="text", text=self._text)],
+            structured_output=self._output,
+        )
         self.state.context.append(result)
         return result
 
@@ -328,3 +349,31 @@ def test_get_or_create_passes_none_when_no_snapshot(tmp_path) -> None:
     store = SessionStore(agent_factory=factory, repository=repo)
     asyncio.run(store.get_or_create("u1", "s1"))
     assert received == [None]
+
+
+def test_persist_writes_snapshot_and_journal(tmp_path) -> None:
+    repo = SessionRepository(tmp_path)
+    store = SessionStore(agent_factory=lambda state=None: FakeAgent(), repository=repo)
+    agent = PersistingAgent(output=_cards_dict())
+    agent.state.context.append(UserMsg(name="user", content="给猫买个饮水器"))
+    response = CommerceIntentResponse(final_text="命中1条", cards=[])
+    asyncio.run(store.persist(("u1", "s1"), agent, "给猫买个饮水器", response))
+    assert repo.load(("u1", "s1")) is not None
+    assert len((tmp_path / "journal.jsonl").read_text(encoding="utf-8").strip().split("\n")) == 2
+
+
+def test_persist_is_noop_without_repository(tmp_path) -> None:
+    store = SessionStore(agent_factory=lambda state=None: FakeAgent())
+    agent = PersistingAgent(output=_cards_dict())
+    response = CommerceIntentResponse(final_text="命中1条", cards=[])
+    asyncio.run(store.persist(("u1", "s1"), agent, "hi", response))  # must not raise
+
+
+def test_evict_removes_session() -> None:
+    async def body() -> bool:
+        store = SessionStore(agent_factory=lambda state=None: FakeAgent())
+        key, _ = await store.get_or_create("u1", "s1")
+        store.evict(key)
+        return len(store) == 0
+
+    assert asyncio.run(body())

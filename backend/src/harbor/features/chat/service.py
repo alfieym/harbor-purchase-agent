@@ -111,6 +111,35 @@ class SessionStore:
             self._sessions[key] = session
             return key, session
 
+    async def persist(
+        self,
+        key: SessionKey,
+        agent: Agent,
+        question: str,
+        response: CommerceIntentResponse,
+    ) -> None:
+        """Durably write the session state + journal, if a repository is wired.
+
+        Snapshot first: a write failure must raise (and be mapped to 500 by the
+        router) *before* we derive ``turn`` from ``agent.state.context`` — the
+        order keeps this compatible with test stubs whose state has no ``role``.
+        The journal is best-effort: a soft failure only logs, it never fails the
+        turn.
+        """
+        repo = self._repository
+        if repo is None:
+            return
+        await asyncio.to_thread(repo.save, key, agent.state)
+        turn = sum(1 for m in agent.state.context if m.role == "user")
+        try:
+            await asyncio.to_thread(repo.append_journal, key, question, response, turn)
+        except Exception:  # noqa: BLE001 — journal is best-effort (S6)
+            logger.warning("failed to append journal for %r", key, exc_info=True)
+
+    def evict(self, key: SessionKey) -> None:
+        """Drop a session from memory (rolls the next access back to its snapshot)."""
+        self._sessions.pop(key, None)
+
     def touch(self, key: SessionKey) -> None:
         """Mark a session active now (extends its TTL). Atomic: no ``await``."""
         session = self._sessions.get(key)
