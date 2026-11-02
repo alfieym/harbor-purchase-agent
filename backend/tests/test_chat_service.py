@@ -377,3 +377,43 @@ def test_evict_removes_session() -> None:
         return len(store) == 0
 
     assert asyncio.run(body())
+
+
+def test_run_turn_persists_snapshot_and_journal(tmp_path) -> None:
+    repo = SessionRepository(tmp_path)
+    store = SessionStore(
+        agent_factory=lambda state=None: PersistingAgent(output=_cards_dict()),
+        repository=repo,
+    )
+    asyncio.run(run_turn(store, "u1", "s1", "给猫买个饮水器"))
+    assert repo.load(("u1", "s1")) is not None
+    assert len((tmp_path / "journal.jsonl").read_text(encoding="utf-8").strip().split("\n")) == 2
+
+
+def test_run_turn_evicts_session_on_failure(tmp_path) -> None:
+    repo = SessionRepository(tmp_path)
+    created: list[FakeAgent] = []
+
+    def factory(state=None) -> FakeAgent:
+        agent = FakeAgent(tool_state=ToolResultState.ERROR)
+        created.append(agent)
+        return agent
+
+    store = SessionStore(agent_factory=factory, repository=repo)
+    with pytest.raises(ToolFailureError):
+        asyncio.run(run_turn(store, "u1", "s1", "hi"))
+    assert len(store) == 0  # 会话被逐出
+    with pytest.raises(ToolFailureError):
+        asyncio.run(run_turn(store, "u1", "s1", "hi"))
+    assert len(created) == 2  # 重试新建 Agent，而非复用失败的那个
+
+
+def test_run_turn_does_not_persist_failed_turn(tmp_path) -> None:
+    repo = SessionRepository(tmp_path)
+    store = SessionStore(
+        agent_factory=lambda state=None: FakeAgent(tool_state=ToolResultState.ERROR),
+        repository=repo,
+    )
+    with pytest.raises(ToolFailureError):
+        asyncio.run(run_turn(store, "u1", "s1", "hi"))
+    assert repo.load(("u1", "s1")) is None
