@@ -6,12 +6,13 @@ reply→cards parsing exactly.
 """
 
 import asyncio
+import logging
 
 import pytest
 from agentscope.message import Msg, TextBlock, ToolResultState, UserMsg
 from agentscope.state import AgentState
 
-from harbor.features.chat.repository import SessionRepository
+from harbor.features.chat.repository import SessionRepository, SnapshotWriteError
 from harbor.features.chat.schemas import CommerceIntentResponse
 from harbor.features.chat.service import (
     ModelFailureError,
@@ -434,3 +435,62 @@ def test_run_turn_does_not_persist_failed_turn(tmp_path) -> None:
     with pytest.raises(ToolFailureError):
         asyncio.run(run_turn(store, "u1", "s1", "hi"))
     assert repo.load(("u1", "s1")) is None
+
+
+def test_run_turn_retries_when_session_evicted_while_waiting() -> None:
+    """A turn must not reuse a session evicted by a concurrent failed turn.
+
+    request A fails and evicts the session while request B is already blocked on
+    the session's lock. B must detect the eviction after acquiring the lock and
+    reload a fresh session, instead of running on A's polluted ``state.context``.
+    """
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    created: list[object] = []
+
+    class GatedFailAgent:
+        def __init__(self) -> None:
+            self.state = FakeState()
+
+        async def reply(self, msg, structured_schema=None) -> FakeMsg:
+            entered.set()
+            await release.wait()
+            self.state.context.append(FakeMsg(tool_state=ToolResultState.ERROR))
+            return FakeMsg(None, "err")
+
+    def factory(state=None):
+        agent = GatedFailAgent() if not created else FakeAgent(output=_cards_dict())
+        created.append(agent)
+        return agent
+
+    store = SessionStore(agent_factory=factory)
+
+    async def body() -> tuple[object, object]:
+        t1 = asyncio.create_task(run_turn(store, "u1", "s1", "first"))
+        await entered.wait()
+        t2 = asyncio.create_task(run_turn(store, "u1", "s1", "second"))
+        await asyncio.sleep(0)  # let t2 fetch the cached session and block on its lock
+        release.set()
+        return await asyncio.gather(t1, t2, return_exceptions=True)
+
+    first, second = asyncio.run(body())
+    assert isinstance(first, ToolFailureError)
+    assert isinstance(second, CommerceIntentResponse)
+    assert len(created) == 2  # the second turn reloaded a fresh session, not the evicted one
+
+
+def test_persist_logs_snapshot_write_failure(tmp_path, caplog) -> None:
+    """A failed snapshot write (disk full / permissions / serialization) must log
+    its root cause server-side, not surface a 500 with no trace."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("i am a file, not a directory", encoding="utf-8")
+    store = SessionStore(
+        agent_factory=lambda state=None: FakeAgent(),
+        repository=SessionRepository(blocker),
+    )
+    agent = PersistingAgent(output=_cards_dict())
+    response = CommerceIntentResponse(final_text="命中1条", cards=[])
+    with caplog.at_level(logging.ERROR, logger="harbor.features.chat.service"):
+        with pytest.raises(SnapshotWriteError):
+            asyncio.run(store.persist(("u1", "s1"), agent, "hi", response))
+    assert any("snapshot write failed" in r.message for r in caplog.records)

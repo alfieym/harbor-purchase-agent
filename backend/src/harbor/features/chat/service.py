@@ -19,7 +19,7 @@ from agentscope.message import ToolResultState, UserMsg
 from agentscope.state import AgentState
 
 from harbor.agents.cards import ProductCardList
-from harbor.features.chat.repository import SessionKey, SessionRepository
+from harbor.features.chat.repository import SessionKey, SessionRepository, SnapshotWriteError
 from harbor.features.chat.schemas import CommerceIntentResponse
 
 logger = logging.getLogger(__name__)
@@ -129,7 +129,14 @@ class SessionStore:
         repo = self._repository
         if repo is None:
             return
-        await asyncio.to_thread(repo.save, key, agent.state)
+        try:
+            await asyncio.to_thread(repo.save, key, agent.state)
+        except SnapshotWriteError:
+            # The router maps this to a 500, but the client only sees a clean
+            # message — log the real cause (disk full / permissions / serialization)
+            # server-side so ops can diagnose it.
+            logger.exception("snapshot write failed for %r", key)
+            raise
         turn = sum(1 for m in agent.state.context if m.role == "user")
         try:
             await asyncio.to_thread(repo.append_journal, key, question, response, turn)
@@ -139,6 +146,15 @@ class SessionStore:
     def evict(self, key: SessionKey) -> None:
         """Drop a session from memory (rolls the next access back to its snapshot)."""
         self._sessions.pop(key, None)
+
+    def is_cached(self, key: SessionKey, session: Session) -> bool:
+        """True if ``session`` is still the live in-memory session for ``key``.
+
+        ``run_turn`` checks this after acquiring the per-session lock: a session
+        evicted by a concurrent failed turn (while this turn waited on the lock)
+        must be reloaded, not reused with the failed turn's residue in its state.
+        """
+        return self._sessions.get(key) is session
 
     def touch(self, key: SessionKey) -> None:
         """Mark a session active now (extends its TTL). Atomic: no ``await``."""
@@ -172,50 +188,57 @@ async def run_turn(
     timeout_seconds: float = 120.0,
 ) -> CommerceIntentResponse:
     """Run one conversational turn and return the model's product cards."""
-    key, session = await store.get_or_create(buyer_id, shopping_session_id)
-    try:
-        async with session.lock:
-            # Snapshot the conversation so a tool failure is attributed to *this*
-            # turn: ``state.context`` persists across resumed sessions, and an ERROR
-            # from an earlier turn must not fail a later one.
-            context_start = len(session.agent.state.context)
-            try:
-                reply = await asyncio.wait_for(
-                    session.agent.reply(
-                        UserMsg(name="user", content=raw_query),
-                        structured_schema=ProductCardList,
-                    ),
-                    timeout=timeout_seconds,
-                )
-            except TimeoutError as exc:
-                raise ModelTimeoutError(timeout_seconds) from exc
-            except Exception as exc:
-                # AgentScope re-raises model-call failures (network / rate-limit /
-                # provider 5xx) out of ``reply``; surface them as a structured error
-                # rather than leaking an unhandled 500 (S5-2). Log the real cause
-                # server-side for ops while the client sees a clean 502.
-                logger.exception("model call failed for session %r", key)
-                raise ModelFailureError() from exc
-            # AgentScope converts a tool exception into an ERROR ``tool_result``
-            # stored in the conversation context — *not* on the returned ``reply``,
-            # which only carries the final text answer. Detect any ERROR produced
-            # during this turn and fail loudly (S5-2) rather than trust whatever the
-            # model guessed after the failed search.
-            for msg in session.agent.state.context[context_start:]:
-                for block in msg.get_content_blocks("tool_result"):
-                    if block.state == ToolResultState.ERROR:
-                        raise ToolFailureError()
-            structured = reply.structured_output
-            if structured is None:
-                raise NoStructuredOutputError(reply.get_text_content() or "")
-            cards = ProductCardList.model_validate(structured)
-            response = CommerceIntentResponse(final_text=cards.summary, cards=cards.cards)
-            await store.persist(key, session.agent, raw_query, response)
-            return response
-    except Exception:
-        # A failed turn must not leave a half-updated session in memory: evict so
-        # the next access reloads the last good snapshot (S6 evict-on-failure).
-        store.evict(key)
-        raise
-    finally:
-        store.touch(key)
+    while True:
+        key, session = await store.get_or_create(buyer_id, shopping_session_id)
+        try:
+            async with session.lock:
+                # A concurrent failed turn on this key may have evicted the session
+                # while we waited for its lock. Our ``session`` reference is then
+                # stale: reload a fresh one so we don't carry the failed turn's
+                # half-updated ``state.context`` into the snapshot we persist.
+                if not store.is_cached(key, session):
+                    continue
+                # Snapshot the conversation so a tool failure is attributed to *this*
+                # turn: ``state.context`` persists across resumed sessions, and an ERROR
+                # from an earlier turn must not fail a later one.
+                context_start = len(session.agent.state.context)
+                try:
+                    reply = await asyncio.wait_for(
+                        session.agent.reply(
+                            UserMsg(name="user", content=raw_query),
+                            structured_schema=ProductCardList,
+                        ),
+                        timeout=timeout_seconds,
+                    )
+                except TimeoutError as exc:
+                    raise ModelTimeoutError(timeout_seconds) from exc
+                except Exception as exc:
+                    # AgentScope re-raises model-call failures (network / rate-limit /
+                    # provider 5xx) out of ``reply``; surface them as a structured error
+                    # rather than leaking an unhandled 500 (S5-2). Log the real cause
+                    # server-side for ops while the client sees a clean 502.
+                    logger.exception("model call failed for session %r", key)
+                    raise ModelFailureError() from exc
+                # AgentScope converts a tool exception into an ERROR ``tool_result``
+                # stored in the conversation context — *not* on the returned ``reply``,
+                # which only carries the final text answer. Detect any ERROR produced
+                # during this turn and fail loudly (S5-2) rather than trust whatever the
+                # model guessed after the failed search.
+                for msg in session.agent.state.context[context_start:]:
+                    for block in msg.get_content_blocks("tool_result"):
+                        if block.state == ToolResultState.ERROR:
+                            raise ToolFailureError()
+                structured = reply.structured_output
+                if structured is None:
+                    raise NoStructuredOutputError(reply.get_text_content() or "")
+                cards = ProductCardList.model_validate(structured)
+                response = CommerceIntentResponse(final_text=cards.summary, cards=cards.cards)
+                await store.persist(key, session.agent, raw_query, response)
+                return response
+        except Exception:
+            # A failed turn must not leave a half-updated session in memory: evict so
+            # the next access reloads the last good snapshot (S6 evict-on-failure).
+            store.evict(key)
+            raise
+        finally:
+            store.touch(key)
