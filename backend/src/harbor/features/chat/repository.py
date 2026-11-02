@@ -16,6 +16,8 @@ from pathlib import Path
 
 from agentscope.state import AgentState
 
+from harbor.features.chat.schemas import CommerceIntentResponse
+
 logger = logging.getLogger(__name__)
 
 SessionKey = tuple[str, str]  # (buyer_id, shopping_session_id)
@@ -96,3 +98,44 @@ class SessionRepository:
         except Exception as exc:  # noqa: BLE001 — corrupt data is a normal case
             logger.warning("ignoring corrupt snapshot %r: %s", path, exc)
             return None
+
+    def append_journal(
+        self,
+        key: SessionKey,
+        question: str,
+        response: CommerceIntentResponse,
+        turn: int,
+    ) -> None:
+        """Append one question + one answer (two JSONL lines) for review/eval.
+
+        Both lines are written in a single ``write`` so a concurrent append from
+        another session cannot split a question from its answer.
+        """
+        ts = datetime.now(timezone.utc).isoformat()
+        user_line = {
+            "role": "user",
+            "buyer_id": key[0],
+            "shopping_session_id": key[1],
+            "ts": ts,
+            "turn": turn,
+            "text": question,
+        }
+        assistant_line = {
+            "role": "assistant",
+            "buyer_id": key[0],
+            "shopping_session_id": key[1],
+            "ts": ts,
+            "turn": turn,
+            "text": response.final_text,
+            "cards": [card.model_dump(mode="json") for card in response.cards],
+        }
+        payload = (
+            json.dumps(user_line, ensure_ascii=False)
+            + "\n"
+            + json.dumps(assistant_line, ensure_ascii=False)
+            + "\n"
+        )
+        path = self.journal_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(payload)
