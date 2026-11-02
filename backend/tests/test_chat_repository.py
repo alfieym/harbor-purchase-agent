@@ -90,8 +90,12 @@ def test_append_journal_writes_two_lines(tmp_path):
 
 def test_append_journal_appends_without_overwriting(tmp_path):
     repo = SessionRepository(tmp_path)
-    repo.append_journal(("u1", "s1"), "q1", CommerceIntentResponse(final_text="a1", cards=[]), turn=1)
-    repo.append_journal(("u1", "s1"), "q2", CommerceIntentResponse(final_text="a2", cards=[]), turn=2)
+    repo.append_journal(
+        ("u1", "s1"), "q1", CommerceIntentResponse(final_text="a1", cards=[]), turn=1
+    )
+    repo.append_journal(
+        ("u1", "s1"), "q2", CommerceIntentResponse(final_text="a2", cards=[]), turn=2
+    )
     lines = (tmp_path / "journal.jsonl").read_text(encoding="utf-8").strip().split("\n")
     assert len(lines) == 4
 
@@ -120,6 +124,10 @@ def test_append_journal_includes_cards(tmp_path):
         weight_kg=1.0,
         sku_id="X1-S1",
     )
-    repo.append_journal(("u1", "s1"), "q", CommerceIntentResponse(final_text="命中1条", cards=[card]), turn=1)
-    second = json.loads((tmp_path / "journal.jsonl").read_text(encoding="utf-8").strip().split("\n")[1])
+    repo.append_journal(
+        ("u1", "s1"), "q", CommerceIntentResponse(final_text="命中1条", cards=[card]), turn=1
+    )
+    second = json.loads(
+        (tmp_path / "journal.jsonl").read_text(encoding="utf-8").strip().split("\n")[1]
+    )
     assert second["cards"][0]["sku_id"] == "X1-S1"

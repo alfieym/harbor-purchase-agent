@@ -11,7 +11,7 @@ import hashlib
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agentscope.state import AgentState
@@ -63,7 +63,7 @@ class SessionRepository:
                 "schema_version": SCHEMA_VERSION,
                 "buyer_id": key[0],
                 "shopping_session_id": key[1],
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
                 "state": state.model_dump(mode="json"),
             }
             path = self.snapshot_path(key)
@@ -111,7 +111,7 @@ class SessionRepository:
         Both lines are written in a single ``write`` so a concurrent append from
         another session cannot split a question from its answer.
         """
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         user_line = {
             "role": "user",
             "buyer_id": key[0],

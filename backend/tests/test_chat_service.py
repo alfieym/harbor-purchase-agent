@@ -8,8 +8,10 @@ reply→cards parsing exactly.
 import asyncio
 
 import pytest
-from agentscope.message import ToolResultState
+from agentscope.message import Msg, TextBlock, ToolResultState
+from agentscope.state import AgentState
 
+from harbor.features.chat.repository import SessionRepository
 from harbor.features.chat.service import (
     ModelFailureError,
     ModelTimeoutError,
@@ -114,7 +116,7 @@ def _cards_dict(summary: str = "命中 1 条") -> dict:
 
 def _store(clock: FakeClock | None = None, max_sessions: int = 1000) -> SessionStore:
     return SessionStore(
-        agent_factory=lambda: FakeAgent(),
+        agent_factory=lambda state=None: FakeAgent(),
         ttl_seconds=1800.0,
         max_sessions=max_sessions,
         clock=clock or FakeClock(),
@@ -192,7 +194,7 @@ def test_lru_evicts_least_recently_used_when_over_capacity() -> None:
 def test_run_turn_parses_structured_output_and_resumes_session() -> None:
     created: list[FakeAgent] = []
 
-    def factory() -> FakeAgent:
+    def factory(state=None) -> FakeAgent:
         agent = FakeAgent(output=_cards_dict("命中 1 条"))
         created.append(agent)
         return agent
@@ -212,7 +214,7 @@ def test_run_turn_parses_structured_output_and_resumes_session() -> None:
 
 
 def test_run_turn_raises_when_model_produces_no_structured_output() -> None:
-    def factory() -> FakeAgent:
+    def factory(state=None) -> FakeAgent:
         return FakeAgent(output=None, text="目录里没有符合条件的商品")
 
     async def body() -> NoStructuredOutputError:
@@ -226,7 +228,7 @@ def test_run_turn_raises_when_model_produces_no_structured_output() -> None:
 
 
 def test_run_turn_raises_model_timeout_error() -> None:
-    def factory() -> FakeAgent:
+    def factory(state=None) -> FakeAgent:
         return FakeAgent(output=_cards_dict(), delay=0.5)
 
     async def body() -> None:
@@ -238,7 +240,7 @@ def test_run_turn_raises_model_timeout_error() -> None:
 
 
 def test_run_turn_raises_tool_failure_error_on_error_tool_result() -> None:
-    def factory() -> FakeAgent:
+    def factory(state=None) -> FakeAgent:
         return FakeAgent(output=None, tool_state=ToolResultState.ERROR)
 
     async def body() -> None:
@@ -261,7 +263,7 @@ def test_run_turn_raises_model_failure_error_when_reply_raises() -> None:
             raise RuntimeError("dashscope rate limited")
 
     async def body() -> None:
-        store = SessionStore(agent_factory=lambda: RaisingAgent())
+        store = SessionStore(agent_factory=lambda state=None: RaisingAgent())
         with pytest.raises(ModelFailureError):
             await run_turn(store, "u1", "s1", "hi")
 
@@ -284,7 +286,7 @@ def test_same_session_concurrent_turns_serialize() -> None:
             return FakeMsg(_cards_dict("命中 1 条"))
 
     async def body() -> None:
-        store = SessionStore(agent_factory=lambda: OverlapAgent())
+        store = SessionStore(agent_factory=lambda state=None: OverlapAgent())
         await asyncio.gather(
             run_turn(store, "u1", "s1", "a"),
             run_turn(store, "u1", "s1", "b"),
@@ -293,3 +295,36 @@ def test_same_session_concurrent_turns_serialize() -> None:
     asyncio.run(body())
     # The per-session lock keeps the single agent's reply from ever overlapping.
     assert state["max_active"] == 1
+
+
+def _repo_state() -> AgentState:
+    s = AgentState()
+    s.context.append(Msg(name="user", role="user", content=[TextBlock(type="text", text="hi")]))
+    return s
+
+
+def test_get_or_create_restores_state_from_repository(tmp_path) -> None:
+    repo = SessionRepository(tmp_path)
+    repo.save(("u1", "s1"), _repo_state())
+    received: list[AgentState | None] = []
+
+    def factory(state: AgentState | None = None) -> FakeAgent:
+        received.append(state)
+        return FakeAgent(output=_cards_dict())
+
+    store = SessionStore(agent_factory=factory, repository=repo)
+    asyncio.run(store.get_or_create("u1", "s1"))
+    assert len(received) == 1 and received[0] is not None
+
+
+def test_get_or_create_passes_none_when_no_snapshot(tmp_path) -> None:
+    repo = SessionRepository(tmp_path)
+    received: list[AgentState | None] = []
+
+    def factory(state: AgentState | None = None) -> FakeAgent:
+        received.append(state)
+        return FakeAgent(output=_cards_dict())
+
+    store = SessionStore(agent_factory=factory, repository=repo)
+    asyncio.run(store.get_or_create("u1", "s1"))
+    assert received == [None]

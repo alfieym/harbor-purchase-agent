@@ -16,13 +16,13 @@ from dataclasses import dataclass
 
 from agentscope.agent import Agent
 from agentscope.message import ToolResultState, UserMsg
+from agentscope.state import AgentState
 
 from harbor.agents.cards import ProductCardList
+from harbor.features.chat.repository import SessionKey, SessionRepository
 from harbor.features.chat.schemas import CommerceIntentResponse
 
 logger = logging.getLogger(__name__)
-
-SessionKey = tuple[str, str]  # (buyer_id, shopping_session_id)
 
 
 class ModelTimeoutError(Exception):
@@ -72,15 +72,17 @@ class SessionStore:
 
     def __init__(
         self,
-        agent_factory: Callable[[], Agent],
+        agent_factory: Callable[[AgentState | None], Agent],
         ttl_seconds: float = 1800.0,
         max_sessions: int = 1000,
         clock: Callable[[], float] = time.monotonic,
+        repository: SessionRepository | None = None,
     ) -> None:
         self._agent_factory = agent_factory
         self._ttl = ttl_seconds
         self._max = max_sessions
         self._clock = clock
+        self._repository = repository
         self._sessions: dict[SessionKey, Session] = {}
         self._mutex = asyncio.Lock()
 
@@ -100,7 +102,12 @@ class SessionStore:
             if session is not None:
                 return key, session
             self._evict_lru()
-            session = Session(agent=self._agent_factory(), lock=asyncio.Lock(), last_active=now)
+            state = None
+            if self._repository is not None:
+                state = await asyncio.to_thread(self._repository.load, key)
+            session = Session(
+                agent=self._agent_factory(state), lock=asyncio.Lock(), last_active=now
+            )
             self._sessions[key] = session
             return key, session
 

@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.llm_configured:
         logger.info("Assembling shared runtime + chat session store…")
         runtime = build_runtime(settings)
-        app.state.chat_store = SessionStore(agent_factory=lambda: build_agent(runtime))
+        app.state.chat_store = SessionStore(agent_factory=lambda state: build_agent(runtime))
         # Exposed for introspection/observability and for the fault-injection
         # smoke test (verify_s5 patches runtime.service.search to force 502).
         app.state.runtime = runtime

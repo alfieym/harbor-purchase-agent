@@ -98,7 +98,7 @@ def _client(store: SessionStore | None, timeout_seconds: float = 120.0) -> TestC
 
 
 def test_intents_returns_final_text_and_cards() -> None:
-    store = SessionStore(agent_factory=lambda: FakeAgent(output=_cards_dict()))
+    store = SessionStore(agent_factory=lambda state=None: FakeAgent(output=_cards_dict()))
     with _client(store) as client:
         resp = client.post(
             "/commerce/intents",
@@ -112,7 +112,7 @@ def test_intents_returns_final_text_and_cards() -> None:
 
 
 def test_intents_resumes_same_buyer_session() -> None:
-    store = SessionStore(agent_factory=lambda: FakeAgent(output=_cards_dict()))
+    store = SessionStore(agent_factory=lambda state=None: FakeAgent(output=_cards_dict()))
     with _client(store) as client:
         client.post(
             "/commerce/intents",
@@ -127,7 +127,9 @@ def test_intents_resumes_same_buyer_session() -> None:
 
 
 def test_intents_no_structured_output_returns_502() -> None:
-    store = SessionStore(agent_factory=lambda: FakeAgent(output=None, text="目录里没有命中"))
+    store = SessionStore(
+        agent_factory=lambda state=None: FakeAgent(output=None, text="目录里没有命中")
+    )
     with _client(store) as client:
         resp = client.post(
             "/commerce/intents",
@@ -139,7 +141,9 @@ def test_intents_no_structured_output_returns_502() -> None:
 
 
 def test_intents_tool_failure_returns_502() -> None:
-    store = SessionStore(agent_factory=lambda: FakeAgent(tool_state=ToolResultState.ERROR))
+    store = SessionStore(
+        agent_factory=lambda state=None: FakeAgent(tool_state=ToolResultState.ERROR)
+    )
     with _client(store) as client:
         resp = client.post(
             "/commerce/intents",
@@ -158,7 +162,7 @@ def test_intents_model_failure_returns_502() -> None:
         async def reply(self, msg, structured_schema=None):
             raise RuntimeError("provider rate limited")
 
-    store = SessionStore(agent_factory=lambda: RaisingAgent())
+    store = SessionStore(agent_factory=lambda state=None: RaisingAgent())
     with _client(store) as client:
         resp = client.post(
             "/commerce/intents",
@@ -170,7 +174,9 @@ def test_intents_model_failure_returns_502() -> None:
 
 
 def test_intents_model_timeout_returns_504() -> None:
-    store = SessionStore(agent_factory=lambda: FakeAgent(output=_cards_dict(), delay=0.5))
+    store = SessionStore(
+        agent_factory=lambda state=None: FakeAgent(output=_cards_dict(), delay=0.5)
+    )
     with _client(store, timeout_seconds=0.01) as client:
         resp = client.post(
             "/commerce/intents",
