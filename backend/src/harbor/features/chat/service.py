@@ -152,7 +152,12 @@ class SessionStore:
 
     def _evict_lru(self) -> None:
         while len(self._sessions) >= self._max:
-            oldest = min(self._sessions, key=lambda key: self._sessions[key].last_active)
+            candidates = [k for k in self._sessions if not self._sessions[k].lock.locked()]
+            if not candidates:
+                # All sessions are in-flight; evicting one would break the
+                # same-session serialization guarantee, so stop safely.
+                break
+            oldest = min(candidates, key=lambda k: self._sessions[k].last_active)
             del self._sessions[oldest]
 
     def __len__(self) -> int:

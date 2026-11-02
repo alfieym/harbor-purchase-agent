@@ -212,6 +212,23 @@ def test_lru_evicts_least_recently_used_when_over_capacity() -> None:
     asyncio.run(body())
 
 
+def test_lru_evict_skips_inflight_session() -> None:
+    async def body() -> None:
+        store = SessionStore(agent_factory=lambda state=None: FakeAgent(), max_sessions=3)
+        _, s_a = await store.get_or_create("u1", "a")
+        await store.get_or_create("u1", "b")
+        await store.get_or_create("u1", "c")
+        await s_a.lock.acquire()  # 模拟 a 正在 reply 中（持锁）
+        try:
+            await store.get_or_create("u1", "d")  # 触发逐出，必须跳过锁住的 a
+        finally:
+            s_a.lock.release()
+        assert ("u1", "a") in store._sessions
+        assert len(store) == 3
+
+    asyncio.run(body())
+
+
 def test_run_turn_parses_structured_output_and_resumes_session() -> None:
     created: list[FakeAgent] = []
 
