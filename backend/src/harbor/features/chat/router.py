@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from harbor.core.config import Settings
+from harbor.features.chat.repository import SnapshotWriteError
 from harbor.features.chat.schemas import CommerceIntentRequest, CommerceIntentResponse
 from harbor.features.chat.service import (
     ModelFailureError,
@@ -40,3 +41,5 @@ async def intents(request: CommerceIntentRequest, http_request: Request) -> Comm
         raise HTTPException(status_code=502, detail="商品检索工具调用失败") from exc
     except NoStructuredOutputError as exc:
         raise HTTPException(status_code=502, detail=f"模型未产出结构化输出：{exc.text}") from exc
+    except SnapshotWriteError as exc:
+        raise HTTPException(status_code=500, detail="会话快照写入失败") from exc

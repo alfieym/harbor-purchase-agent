@@ -65,3 +65,9 @@ def test_cors_origins_json(
     monkeypatch.setenv("HARBOR_CORS_ORIGINS", '["http://example.com"]')
 
     assert clean_env().cors_origins == ["http://example.com"]
+
+
+def test_sessions_dir_defaults_to_absolute_repo_root(clean_env: Callable[..., Settings]) -> None:
+    s = clean_env()
+    assert s.sessions_dir.is_absolute()
+    assert s.sessions_dir.name == "sessions"

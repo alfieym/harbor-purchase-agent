@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from harbor.core.config import Settings
 from harbor.core.errors import install_error_handlers
+from harbor.features.chat.repository import SnapshotWriteError
 from harbor.features.chat.router import router
 from harbor.features.chat.service import SessionStore
 
@@ -95,6 +96,17 @@ def _client(store: SessionStore | None, timeout_seconds: float = 120.0) -> TestC
     app.state.chat_store = store
     app.state.settings = Settings(_env_file=None, turn_timeout_seconds=timeout_seconds)
     return TestClient(app)
+
+
+class _FailingRepo:
+    def load(self, key):
+        return None
+
+    def save(self, key, state):
+        raise SnapshotWriteError()
+
+    def append_journal(self, *args, **kwargs):
+        pass
 
 
 def test_intents_returns_final_text_and_cards() -> None:
@@ -196,3 +208,18 @@ def test_intents_not_configured_returns_503() -> None:
 
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "http_503"
+
+
+def test_intents_snapshot_failure_returns_500() -> None:
+    store = SessionStore(
+        agent_factory=lambda state=None: FakeAgent(output=_cards_dict()),
+        repository=_FailingRepo(),
+    )
+    with _client(store) as client:
+        resp = client.post(
+            "/commerce/intents",
+            json={"buyer_id": "u1", "shopping_session_id": "s1", "raw_query": "hi"},
+        )
+
+    assert resp.status_code == 500
+    assert resp.json()["error"]["code"] == "http_500"

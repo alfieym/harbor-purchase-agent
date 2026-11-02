@@ -9,6 +9,7 @@ from harbor.agents.factory import build_agent, build_runtime
 from harbor.core.config import Settings, get_settings
 from harbor.core.errors import install_error_handlers
 from harbor.core.logging import setup_logging
+from harbor.features.chat.repository import SessionRepository
 from harbor.features.chat.router import router as commerce_router
 from harbor.features.chat.service import SessionStore
 from harbor.features.health.router import router as health_router
@@ -30,7 +31,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.llm_configured:
         logger.info("Assembling shared runtime + chat session store…")
         runtime = build_runtime(settings)
-        app.state.chat_store = SessionStore(agent_factory=lambda state: build_agent(runtime))
+        repo = SessionRepository(settings.sessions_dir)
+        app.state.chat_store = SessionStore(
+            agent_factory=lambda state: build_agent(runtime, state=state),
+            repository=repo,
+        )
         # Exposed for introspection/observability and for the fault-injection
         # smoke test (verify_s5 patches runtime.service.search to force 502).
         app.state.runtime = runtime

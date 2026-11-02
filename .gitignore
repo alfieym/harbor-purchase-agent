@@ -24,3 +24,6 @@ backend/.env
 
 # Local search index cache (Qdrant on-disk)
 .cache/
+
+# Session snapshots + journal (runtime persistence, S6)
+data/sessions/

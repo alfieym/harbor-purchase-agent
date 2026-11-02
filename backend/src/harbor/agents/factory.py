@@ -15,6 +15,7 @@ from pathlib import Path
 
 from agentscope.agent import Agent, ReActConfig
 from agentscope.model import ChatModelBase
+from agentscope.state import AgentState
 from agentscope.tool import Toolkit
 from qdrant_client import QdrantClient
 
@@ -152,14 +153,19 @@ def build_runtime(settings: Settings, data_path: Path | None = None) -> AgentRun
     )
 
 
-def build_agent(runtime: AgentRuntime) -> Agent:
-    """Assemble a fresh per-session Agent on top of the shared runtime."""
+def build_agent(runtime: AgentRuntime, state: AgentState | None = None) -> Agent:
+    """Assemble a fresh per-session Agent on top of the shared runtime.
+
+    ``state`` restores a previous session's full conversation (S6): the store
+    passes the snapshot it loaded from disk, or ``None`` for a brand-new session.
+    """
     tool = make_product_search_tool(runtime.service)
     agent = Agent(
         name="purchase_agent",
         system_prompt=system_prompt_for(runtime.categories),
         model=runtime.model,
         toolkit=Toolkit([tool]),
+        state=state,
         # ``interruption_raise_cancelled_error=True``: when ``run_turn``'s
         # ``asyncio.wait_for`` cancels a turn at the timeout budget, AgentScope
         # otherwise swallows the CancelledError and returns an "INTERRUPTED"

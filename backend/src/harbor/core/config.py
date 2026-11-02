@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr
@@ -76,6 +77,10 @@ class Settings(BaseSettings):
     # Hard ceiling on one model+tool turn (S5-2): when the whole ReAct turn runs
     # longer than this, the request fails with a structured 504 instead of hanging.
     turn_timeout_seconds: float = Field(default=120.0, gt=0)
+
+    # S6: durable session snapshots + journal live under this directory
+    # (repo-root anchored, matching ``DEFAULT_DATA_PATH`` in factory.py).
+    sessions_dir: Path = Path(__file__).resolve().parents[4] / "data" / "sessions"
 
     @property
     def is_development(self) -> bool:
