@@ -19,6 +19,7 @@ from agentscope.message import ToolResultState, UserMsg
 from agentscope.state import AgentState
 
 from harbor.agents.cards import ProductCardList
+from harbor.agents.context_governance import ContextCapacityError, recorded_turn_count
 from harbor.features.chat.repository import SessionKey, SessionRepository, SnapshotWriteError
 from harbor.features.chat.schemas import CommerceIntentResponse
 
@@ -137,7 +138,9 @@ class SessionStore:
             # server-side so ops can diagnose it.
             logger.exception("snapshot write failed for %r", key)
             raise
-        turn = sum(1 for m in agent.state.context if m.role == "user")
+        turn = recorded_turn_count(agent.state) or sum(
+            1 for m in agent.state.context if m.role == "user"
+        )
         try:
             await asyncio.to_thread(repo.append_journal, key, question, response, turn)
         except Exception:  # noqa: BLE001 — journal is best-effort (S6)
@@ -198,10 +201,16 @@ async def run_turn(
                 # half-updated ``state.context`` into the snapshot we persist.
                 if not store.is_cached(key, session):
                     continue
-                # Snapshot the conversation so a tool failure is attributed to *this*
-                # turn: ``state.context`` persists across resumed sessions, and an ERROR
-                # from an earlier turn must not fail a later one.
-                context_start = len(session.agent.state.context)
+                # Snapshot the tool results so a failure is attributed to *this*
+                # turn: ``state.context`` persists across resumed sessions, and an
+                # ERROR from an earlier turn must not fail a later one. Track block
+                # ids, not an index — S7 compression shrinks the list mid-turn.
+                known_results = {
+                    block.id
+                    for msg in session.agent.state.context
+                    for block in msg.get_content_blocks("tool_result")
+                    if getattr(block, "id", None) is not None
+                }
                 try:
                     reply = await asyncio.wait_for(
                         session.agent.reply(
@@ -212,6 +221,10 @@ async def run_turn(
                     )
                 except TimeoutError as exc:
                     raise ModelTimeoutError(timeout_seconds) from exc
+                except ContextCapacityError:
+                    # S7: a capacity failure is its own contract (507), not a
+                    # generic model failure (502).
+                    raise
                 except Exception as exc:
                     # AgentScope re-raises model-call failures (network / rate-limit /
                     # provider 5xx) out of ``reply``; surface them as a structured error
@@ -224,8 +237,11 @@ async def run_turn(
                 # which only carries the final text answer. Detect any ERROR produced
                 # during this turn and fail loudly (S5-2) rather than trust whatever the
                 # model guessed after the failed search.
-                for msg in session.agent.state.context[context_start:]:
+                for msg in session.agent.state.context:
                     for block in msg.get_content_blocks("tool_result"):
+                        block_id = getattr(block, "id", None)
+                        if block_id is not None and block_id in known_results:
+                            continue
                         if block.state == ToolResultState.ERROR:
                             raise ToolFailureError()
                 structured = reply.structured_output

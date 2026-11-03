@@ -1,0 +1,782 @@
+<title>S7 上下文治理</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --warn: #9A6700; --warn-soft: #FBF3DF; --soft: #3353A6; --soft-soft: #EAF0FB;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --warn: #E0A63C; --warn-soft: #2E2617; --soft: #8FB0E8; --soft-soft: #182238;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --warn: #E0A63C; --warn-soft: #2E2617; --soft: #8FB0E8; --soft-soft: #182238;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(48px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; }
+  header { margin-bottom: 20px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 82ch; }
+  .sub b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.query { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+  .chip.soft { border-color: var(--soft); color: var(--soft); }
+  .chip.warn { border-color: var(--warn); color: var(--warn); }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 14px 16px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .flow-break { flex-basis: 100%; height: 2px; }
+  .flow-step { display: flex; flex-direction: column; align-items: center; min-width: 76px; padding: 2px 8px; }
+  .fidx { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); }
+  .fname { font-size: 14px; font-weight: 600; }
+  .fcount { font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; text-align: center; }
+  .flow-link { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--faint); }
+  .farrow { font-size: 18px; line-height: 1; }
+  .fwhat { font-size: 11px; color: var(--muted); font-family: "IBM Plex Mono", monospace; max-width: 130px; text-align: center; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+
+  .mhead { margin: 36px 0 4px; font-size: 19px; font-weight: 700; }
+  .msub { color: var(--muted); font-size: 13px; margin: 0 0 14px; max-width: 82ch; }
+  .msub b { color: var(--fg); }
+
+  /* --- 缺口 / 承诺 --- */
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+  .card h4 { margin: 0; font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .card p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .card p b { color: var(--fg); }
+  .card code { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; color: var(--fg); word-break: break-word; }
+  .card.gapcard { border-left: 3px solid var(--bad); }
+  .card.promise { border-left: 3px solid var(--accent); }
+  .tag { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px dashed; letter-spacing: .03em; }
+  .tag.hook { color: var(--accent-ink); border-color: var(--accent); }
+  .tag.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+  .tag.ok { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+
+  /* --- 调用链 --- */
+  .chain { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; white-space: pre; overflow-x: auto; line-height: 1.75; }
+  .chain .our { color: var(--accent-ink); font-weight: 500; }
+  .chain .as { color: var(--muted); }
+  .chain .cm { color: var(--faint); }
+
+  /* --- 代码 --- */
+  .code { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+  .code .ln { display: grid; grid-template-columns: 46px 1fr; gap: 10px; padding: 2px 12px; white-space: pre; }
+  .code .no { color: var(--faint); text-align: right; user-select: none; }
+  .code .c { color: var(--muted); }
+  .code .kw { color: var(--accent-ink); }
+  .code .st { color: var(--good); }
+
+  /* --- 文件树 --- */
+  .tree { font-family: "IBM Plex Mono", monospace; font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; white-space: pre; overflow-x: auto; line-height: 1.75; }
+  .tree .d { color: var(--accent-ink); font-weight: 500; }
+  .tree .f { color: var(--fg); }
+  .tree .cm { color: var(--faint); }
+
+  /* --- 重放 --- */
+  .replaybar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .btn { font-family: "IBM Plex Sans", sans-serif; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn.ghost { background: var(--surface); color: var(--accent-ink); border-color: var(--border); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .stepno { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); margin-left: auto; }
+  .narration { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; margin-bottom: 12px; min-height: 46px; }
+  .narration b { color: var(--accent-ink); }
+  .lanes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .lanes { grid-template-columns: 1fr; } }
+  .lane { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; min-height: 220px; min-width: 0; }
+  .lane-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .lane-name { font-weight: 600; font-size: 14px; }
+  .lane-sub { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); }
+  .lane-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; min-width: 0; }
+  .lane-body .empty { color: var(--faint); font-family: "IBM Plex Mono", monospace; }
+  .jline { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; padding: 5px 8px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .jline.ok { border-left: 3px solid var(--good); }
+  .jline.bad { border-left: 3px solid var(--bad); }
+  .jline.new { box-shadow: 0 0 0 2px var(--accent); }
+  .snapbox { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; }
+  .snapbox .k { color: var(--muted); }
+  .snapbox .v { color: var(--accent-ink); }
+  .snapbox.bad { border-color: var(--bad); }
+
+  /* --- 闸门仪表 --- */
+  .meter { position: relative; height: 26px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; overflow: hidden; margin-top: 2px; }
+  .meter-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: .55; transition: width .2s ease; }
+  .meter-fill.over { background: var(--bad); opacity: .6; }
+  .meter-gate { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--bad); }
+  .meter-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .gatestat { font-family: "IBM Plex Mono", monospace; font-size: 11px; padding: 4px 8px; border-radius: 7px; text-align: center; }
+  .gatestat.ok { color: var(--good); background: var(--good-soft); }
+  .gatestat.over { color: var(--warn); background: var(--warn-soft); }
+  .gatestat.bad { color: var(--bad); background: var(--bad-soft); }
+
+  /* --- 表 --- */
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; overflow-x: auto; }
+  .trow { display: grid; grid-template-columns: 1.1fr 1.4fr 70px 1.1fr; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); min-width: 620px; }
+  .trow:last-child { border-bottom: 0; }
+  .trow.head { background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .trow .sc { font-size: 13px; }
+  .trow .bh { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); }
+  .tstat { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; text-align: center; white-space: nowrap; }
+  .tstat.ok { color: var(--good); background: var(--good-soft); }
+  .tstat.warn { color: var(--warn); background: var(--warn-soft); }
+  .tstat.bad { color: var(--bad); background: var(--bad-soft); }
+  .tstat.info { color: var(--accent-ink); background: var(--surface-2); }
+  #tests .trow { grid-template-columns: 92px 1.5fr 1.1fr 56px; }
+  #config .trow { grid-template-columns: 1.3fr 0.8fr 1.8fr 56px; }
+
+  /* --- 对照 --- */
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 820px) { .cmp { grid-template-columns: 1fr; } }
+  .cmp .card { min-width: 0; }
+  .cmp .card.before { border-left: 3px solid var(--bad); }
+  .cmp .card.after { border-left: 3px solid var(--good); }
+
+  .note { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+  .note.warn { border-left-color: var(--warn); }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { gap: 2px; padding: 12px 8px; }
+    .flow-step { min-width: 0; padding: 2px 4px; }
+    .farrow { font-size: 15px; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .meter-fill { transition: none; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Purchase Agent · S7</p>
+    <h1>上下文治理：归档、校验、闸门</h1>
+    <p class="sub">S6 让历史不再丢，代价是 <span class="mono">state.context</span> 只增不减。AgentScope 自带的压缩是 <b>best-effort</b>：摘要可能编造商品，失败时会直接截断，也没有任何机制阻止超限请求发给模型。S7 在每次 model call 外层加中间件，把「压缩」变成一条<b>可审计、可回滚、有硬上限</b>的流程——这正是「实际没推荐过，却声称之前推荐过 X」这类回答的根因。</p>
+    <div class="chips">
+      <span class="chip query">trigger 0.60 · gate 0.85</span>
+      <span class="chip">protect_turns = 2</span>
+      <span class="chip">archive:// 指针</span>
+      <span class="chip soft">摘要来源校验</span>
+      <span class="chip warn">超限 → 507</span>
+      <span class="chip good">31 条 S7 用例 · 226 全绿</span>
+    </div>
+
+    <div class="flow" aria-label="S7 主流程">
+      <div class="flow-step"><span class="fidx">①</span><span class="fname">请求</span><span class="fcount">reply()</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">on_reply</span></div>
+      <div class="flow-step"><span class="fidx">②</span><span class="fname">计数 +1</span><span class="fcount">turn_count</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">每次 model call</span></div>
+      <div class="flow-step"><span class="fidx">③</span><span class="fname">数 token</span><span class="fcount">count_tokens</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">&gt; 0.85 窗口</span></div>
+      <div class="flow-break"></div>
+      <div class="flow-step"><span class="fidx">④</span><span class="fname">强制压缩</span><span class="fcount">trigger ≈ 0</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">边界 · 归档 · 摘要</span></div>
+      <div class="flow-step"><span class="fidx">⑤</span><span class="fname">校验</span><span class="fcount">来源 + 边界</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">失败则回滚</span></div>
+      <div class="flow-step"><span class="fidx">⑥</span><span class="fname">重计数</span><span class="fcount">_prepare_model_input</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">仍超限</span></div>
+      <div class="flow-step"><span class="fidx">⑦</span><span class="fname">转发 / 507</span><span class="fcount">ContextCapacityError</span></div>
+    </div>
+    <p class="hint">下面依次拆：内置压缩缺什么 → 中间件挂在调用链的哪一层 → 四个承诺各自的实现 → 一次被驳回的压缩（可交互重放）→ 它顺手修掉的 S6 回归 → 配置与测试。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2 class="mhead">内置压缩缺的不是「压缩」，是「保证」</h2>
+  <p class="msub">AgentScope 的压缩本身是完整的：切分、摘要、保留尾部、调用 offloader，一样不少。问题在于它的每一条路径都假设「摘要模型会照实写」。</p>
+  <div class="grid3">
+    <div class="card gapcard">
+      <h4>摘要可以编造 <span class="tag bad">gap 1</span></h4>
+      <p>摘要由模型生成，没有任何机制核对它提到的商品是否真的出现过。一旦编造出一个 SKU，后续轮次的模型会把它当成<b>真实历史</b>继续引用。</p>
+    </div>
+    <div class="card gapcard">
+      <h4>失败会静默截断 <span class="tag bad">gap 2</span></h4>
+      <p>压缩兜底开关默认打开：摘要模型报错就丢掉旧消息，只留一句 <span class="mono">"Some earlier messages were truncated"</span>。金额、商品、工具调用一起消失。</p>
+    </div>
+    <div class="card gapcard">
+      <h4>没有硬上限 <span class="tag bad">gap 3</span></h4>
+      <p>压缩是「尽力」而不是「保证」。压完仍超限时，AgentScope 不会拦下请求——超长请求照样发给模型，换来一个 400 或一段被服务端截断的输入。</p>
+    </div>
+    <div class="card gapcard">
+      <h4>边界不受保护 <span class="tag bad">gap 4</span></h4>
+      <p>保留区按 token 比例切分，可能把最近一轮用户消息或一个工具调用/结果对<b>从中间切开</b>——模型看到有调用、没结果。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">中间件挂在调用链的哪一层</h2>
+  <p class="msub">AgentScope 提供九个钩子；S7 只实现三个，因为只有这三个位置能同时看见<b>需要的信息</b>和<b>需要改的状态</b>。</p>
+  <div class="chain" id="chain"></div>
+  <div class="grid3" style="margin-top:10px">
+    <div class="card promise">
+      <h4>on_reply <span class="tag hook">外层</span></h4>
+      <p>回复入口，包住整轮。做两件小事：清掉上一轮的闸门错误；把 <code>turn_count</code> 写进 <code>middle_context</code> 并 +1。</p>
+    </div>
+    <div class="card promise">
+      <h4>on_compress_context <span class="tag hook">压缩层</span></h4>
+      <p>唯一能在压缩<b>前后</b>同时拿到完整状态的位置：改 <code>context_config</code>、看压缩后的 <code>context</code> / <code>summary</code>、失败时整份回滚。</p>
+    </div>
+    <div class="card promise">
+      <h4>on_model_call <span class="tag hook">调用层</span></h4>
+      <p>拿得到 <code>current_model</code>、真实的 <code>messages</code> / <code>tools</code> 和 <code>count_tokens</code>——闸门只能放在这里。它包在重试循环内部。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">四个承诺</h2>
+  <p class="msub">用户原话：「旧结果归档指针（不是单纯压缩）」「摘要必须做来源校验」「摘要失败时回滚」「容量是闸门而不是建议」「保护边界：最近两轮 + 商品 + 工具正确调用」。逐条对应到代码。</p>
+  <div class="grid3">
+    <div class="card promise">
+      <h4>归档，不销毁 <span class="tag ok">offloader</span></h4>
+      <p>压缩前把整批旧消息写成 JSON，摘要里留 <code>archive://&lt;session&gt;/&lt;seq&gt;</code> 指针。模型用 <code>read_archive</code> 回查，人直接打开文件。</p>
+    </div>
+    <div class="card promise">
+      <h4>摘要必须对得上来源 <span class="tag ok">validate_summary</span></h4>
+      <p>摘要提到的 SKU 必须在「被压缩原文 ∪ 保留尾部 ∪ 上一版摘要」里出现过；提到某 SKU 时，价格数字必须与来源一致。</p>
+    </div>
+    <div class="card promise">
+      <h4>失败就回滚 <span class="tag ok">restore</span></h4>
+      <p>摘要报错、校验不过、边界被切——一律恢复压缩前的 <code>context</code> 与 <code>summary</code>，不抛异常；本轮命运交给闸门决定。</p>
+    </div>
+    <div class="card promise">
+      <h4>容量是闸门 <span class="tag ok">gate</span></h4>
+      <p>超过 <code>0.85 × context_size</code> 先强制压缩；压完仍超限就抛 <code>ContextCapacityError</code>，路由映射为 <b>507</b>，绝不发给模型。</p>
+    </div>
+    <div class="card promise">
+      <h4>保护边界 <span class="tag ok">reserve_ratio</span></h4>
+      <p>最近两轮用户消息及其后全部消息不参与压缩。先抬高 <code>reserve_ratio</code> 让内置切分不碰它，压完再逐条复核。</p>
+    </div>
+    <div class="card promise">
+      <h4>事实附录 <span class="tag ok">append_protected_facts</span></h4>
+      <p>校验通过后追加一段<b>机器生成</b>的商品事实。摘要可以写得很概括，但 SKU、标题、金额不会因为概括而消失。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">归档：不销毁，只换一个指针</h2>
+  <p class="msub">归档是 S7 里唯一「面向未来」的产物：它不参与恢复，只服务追溯。指针写进摘要，所以模型看得见；文件是普通 JSON，所以人看得见。</p>
+  <div class="tree" id="tree"></div>
+  <div class="cmp" style="margin-top:12px">
+    <div class="card">
+      <h4>摘要里的样子 <span class="tag hook">AgentScope 生成</span></h4>
+      <div class="code" id="pointercode"></div>
+      <p>指针由 AgentScope 在 <code>_apply_change</code> 里拼成一个 <code>&lt;system-reminder&gt;</code> 文本块，追加在摘要末尾。我们只负责让它指向一个真实文件。</p>
+    </div>
+    <div class="card">
+      <h4>模型回查的样子 <span class="tag ok">read_archive</span></h4>
+      <div class="code" id="readcode"></div>
+      <p>只读工具，自带 <code>PermissionDecision(ALLOW)</code>，不弹确认。指针非法或文件缺失时返回 <code>{"error": "归档不存在或无权限"}</code>，让模型放弃回查而不是炸掉回合。</p>
+    </div>
+  </div>
+  <div class="note warn">
+    <b>回滚后归档会变成「孤儿」：</b>文件已经写出，但摘要被恢复、指针随之消失，模型再也看不到它。这是有意的——留痕优先于一致。运维可以按会话目录审计这些批次；自动清理不在 S7 范围内。
+  </div>
+
+  <h2 class="mhead">来源校验：只抓「编造」和「价格错配」</h2>
+  <p class="msub">校验对象是<b>模型写的那段摘要文本</b>。刻意不做「覆盖性」检查——要求摘要列全所有商品会让每次压缩都误判回滚；覆盖性由确定性的附录保证。</p>
+  <div class="tbl" id="validate"></div>
+  <div class="code" style="margin-top:12px" id="validatecode"></div>
+  <div class="cmp" style="margin-top:12px">
+    <div class="card">
+      <h4>通过 <span class="tag ok">追加附录</span></h4>
+      <div class="snapbox"><span class="k">## 任务概述</span>
+为用户挑了两款猫包，预算内。
+<span class="v">## 受保护事实（机器生成，未经过模型）</span>
+- P3472-S1 | 轻便宠物出行包 | ¥567.00 CNY
+- P5108-S3 | 透气双肩猫包 | ¥899.00 CNY</div>
+      <p>摘要可以概括、可以省略，但金额和 SKU 从原文<b>逐字</b>抄进附录。重复压缩时整段重写，不会层层堆叠。</p>
+    </div>
+    <div class="card">
+      <h4>不通过 <span class="tag bad">整份回滚</span></h4>
+      <div class="snapbox bad"><span class="k">violations</span>
+- 摘要提到来源中不存在的商品 P9999-S1
+- 商品 P3472-S1 的价格与来源不一致（来源 567.00）</div>
+      <p>任一条命中就恢复压缩前的 <code>context</code> / <code>summary</code>，记 <span class="mono">logger.warning</span>。不抛异常，交给闸门判断本轮还能不能继续。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">保护边界：先让切分别碰它，再复核它没被碰</h2>
+  <p class="msub">「最近两轮」按<b>用户消息</b>定位：取倒数第 2 条 user 消息及其后全部消息。这个区间里同时包含完整的工具调用与结果对。</p>
+  <div class="code" id="boundarycode"></div>
+  <div class="grid3" style="margin-top:12px">
+    <div class="card">
+      <h4>第一道：抬 reserve_ratio</h4>
+      <p>先量出「system + 保护尾部」的 token 占比，让内置切分至少保留这么多。上限卡在 <code>trigger - 0.01</code>，保证还有东西可压。</p>
+    </div>
+    <div class="card">
+      <h4>第二道：逐条复核</h4>
+      <p>压缩后按消息 id 找回来，再检查每条消息里的<b>每个 block id</b> 都还在——AgentScope 可能在 block 层切分，只查消息 id 会漏。</p>
+    </div>
+    <div class="card">
+      <h4>失败：回滚</h4>
+      <p>边界被切走或工具对被拆 → 恢复压缩前状态。与摘要校验走同一条回滚路径，日志里注明原因。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">容量闸门：0.85 是上限，不是建议</h2>
+  <p class="msub">每次 model call 都先数 token。没过闸门就原样转发；过了就强制压缩一次、重新数，仍然过不去就让本轮失败。</p>
+  <div class="code" id="gatecode"></div>
+  <div class="grid3" style="margin-top:12px">
+    <div class="card">
+      <h4>为什么重试要「立即失败」 <span class="tag bad">retry</span></h4>
+      <p><code>on_model_call</code> 包在 AgentScope 的重试循环里。闸门抛出的异常会被捕获并重试——不设标志的话，每次重试都会重新压缩、重新数 token。置位 <code>_gate_error</code> 后，下一轮进入立即抛。</p>
+    </div>
+    <div class="card">
+      <h4>为什么是 507</h4>
+      <p>不是模型失败（502），也不是超时（504），而是「服务端无法在容量内完成请求」。507 语义准确，沿用统一错误信封。</p>
+    </div>
+    <div class="card">
+      <h4>失败后的会话</h4>
+      <p><code>run_turn</code> 必须显式 <code>except ContextCapacityError: raise</code> 透传，否则会被包装成 502。失败轮不落盘，会话被逐出（S6 失败语义）。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead" id="replay">一次被驳回的压缩（可交互重放）</h2>
+  <p class="msub">点「下一步」：这一轮在工具返回后超过闸门，中间件强制压缩，摘要却编造了一个 SKU。看归档、状态与闸门三者如何交错。</p>
+  <div class="replaybar">
+    <button class="btn" id="next">下一步 →</button>
+    <button class="btn ghost" id="reset">重置</button>
+    <span class="stepno" id="stepno"></span>
+  </div>
+  <div class="narration" id="narration"></div>
+  <div class="lanes">
+    <section class="lane">
+      <div class="lane-head"><span class="lane-name">Agent 状态</span><span class="lane-sub">context / summary</span></div>
+      <div class="lane-body" id="lane-state"></div>
+    </section>
+    <section class="lane">
+      <div class="lane-head"><span class="lane-name">归档目录</span><span class="lane-sub">archives/s7-demo/</span></div>
+      <div class="lane-body" id="lane-archive"></div>
+    </section>
+    <section class="lane">
+      <div class="lane-head"><span class="lane-name">闸门</span><span class="lane-sub">tokens / 0.85 窗口</span></div>
+      <div class="lane-body" id="lane-gate"></div>
+    </section>
+  </div>
+  <div class="note">
+    <b>如果校验通过：</b>摘要保留，追加事实附录，重新计数到 0.41 ≤ 0.85，原样转发给模型——这一轮正常完成。重放展示的是 <b>失败分支</b>，因为只有失败时才会看到回滚、孤儿归档和 507 三者同时出现。
+  </div>
+
+  <h2 class="mhead">顺手修掉的两个 S6 回归</h2>
+  <p class="msub">压缩会改变 <code>context</code> 的长度和内容，所有「从 context 推导」的旧逻辑都要重审。这两个问题不是 S7 新功能，而是新机制撞出来的老假设。</p>
+  <div class="cmp">
+    <div class="card before">
+      <h4>回归 1：工具失败归因 <span class="tag bad">before</span></h4>
+      <p><code>run_turn</code> 原本从 <code>context[context_start:]</code> 找本轮 ERROR 的 tool_result。压缩缩短列表后，下标可能越过尾部，<b>本轮失败被漏判、错误结果当成功落盘</b>。</p>
+      <p><b>修复：</b>记录回合开始前已有的 tool_result block id，回合结束后只看「新出现的 id」。</p>
+    </div>
+    <div class="card after">
+      <h4>修复后的归因 <span class="tag ok">after</span></h4>
+      <div class="code" id="toolfailcode"></div>
+    </div>
+    <div class="card before">
+      <h4>回归 2：轮次计数 <span class="tag bad">before</span></h4>
+      <p>S6 的 <code>turn_count</code> 靠数 context 里的 user 消息。压缩删掉旧消息后，计数会<b>倒退</b>，流水里的 turn 也跟着错。</p>
+      <p><b>修复：</b>计数搬到 <code>state.middle_context["harbor.context_governance"]</code>，随快照持久化；旧快照没有这个键时，首次 reply 用 user 消息数补种。</p>
+    </div>
+    <div class="card after">
+      <h4>修复后的计数 <span class="tag ok">after</span></h4>
+      <div class="code" id="turncode"></div>
+    </div>
+  </div>
+
+  <h2 class="mhead" id="config-head">配置</h2>
+  <p class="msub">全部走 <code>HARBOR_*</code> 环境变量，已在 <span class="mono">backend/.env.example</span> 里记录。阈值都是「占模型窗口的比例」。</p>
+  <div class="tbl" id="config"></div>
+
+  <h2 class="mhead">S7 测试（31 条）</h2>
+  <p class="msub">两档：桩 Agent 验证每个分支；再用<b>真实 AgentScope 压缩管线</b>（真 <code>Agent</code>、真切分、真 offloader，只有摘要是桩）验证不变量在真实现下成立。</p>
+  <div class="tbl" id="tests"></div>
+
+  <h2 class="mhead">失败语义</h2>
+  <p class="msub">判断标准：<b>这一步失败时，用户看到什么、磁盘留下什么</b>。</p>
+  <div class="tbl" id="failures"></div>
+
+  <div class="note">
+    <b>显式不在 S7：</b>跨会话归档检索、归档自动清理、摘要质量打分（LLM-as-judge）、修改 AgentScope 内置压缩算法、把归档纳入恢复链路。归档是追溯用的旁路，不是第二份真相源。
+  </div>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  // ---------- 调用链 ----------
+  const CHAIN = [
+    ["Agent.reply()", "as"],
+    ["└─ on_reply", "our"],
+    ["   ├─ _gate_error = None          ", "cm"],
+    ["   └─ turn_count += 1             ", "cm"],
+    ["   └─ Reasoning", "as"],
+    ["      ├─ on_compress_context       ", "our"],
+    ["      │   ├─ _protect_boundary     ", "cm"],
+    ["      │   ├─ 摘要模型（结构化）    ", "cm"],
+    ["      │   ├─ offload_context → archive://…", "cm"],
+    ["      │   └─ _apply_change         ", "cm"],
+    ["      └─ _call_model              ", "as"],
+    ["         └─ on_model_call         ", "our"],
+    ["            ├─ count_tokens        ", "cm"],
+    ["            └─ 超限 → 强制压缩     ", "cm"],
+    ["            └─ model(...)          ", "as"],
+  ];
+  $("chain").innerHTML = CHAIN.map(([t, k]) =>
+    `<span class="${k}">${esc(t)}</span>`).join("\n");
+
+  // ---------- 文件树 ----------
+  $("tree").innerHTML =
+`<span class="d">data/sessions/</span>                          <span class="cm"># git-ignored（运行时状态）</span>
+├── <span class="d">snapshots/</span>                      <span class="cm"># S6：恢复的真相源</span>
+└── <span class="d">archives/</span>
+    └── <span class="d">s7-demo/</span>                    <span class="cm"># 会话 id 安全化：非法字符 → _</span>
+        ├── <span class="f">0001-context.json</span>        <span class="cm"># 第一批被压缩的消息</span>
+        ├── <span class="f">0002-context.json</span>
+        ├── <span class="f">0002-tool-result.json</span>   <span class="cm"># 单条工具结果卸载（如启用）</span>
+        └── <span class="f">0003-context.json</span>        <span class="cm"># 本次（校验失败后成为孤儿）</span>
+
+<span class="cm"># 指针：archive://s7-demo/0003 → 目录 + 四位序号；_resolve 拒绝越界路径</span>`;
+
+  $("pointercode").innerHTML = [
+    "{",
+    '  "summary": "用户看过 3 款猫包，预算 1000 元以内……\\n',
+    '   <system-reminder>The compressed context is offloaded',
+    "   to 'archive://s7-demo/0003', you can refer to it when",
+    '   needed.</system-reminder>"',
+    "}",
+  ].map((t, i) => `<div class="ln"><span class="no">${i + 1}</span><span>${esc(t)}</span></div>`).join("");
+
+  $("readcode").innerHTML = [
+    "// 模型调用：read_archive(\"archive://s7-demo/0003\")",
+    "{",
+    '  "archive_id": "archive://s7-demo/0003",',
+    '  "created_at": "2026-11-03T09:41:12+00:00",',
+    '  "message_count": 12,',
+    '  "messages": [',
+    '    {"role": "user", "text": "预算 800，给猫买个出行包",',
+    '     "tool_calls": [], "tool_results": []},',
+    '    {"role": "assistant", "text": "",',
+    '     "tool_calls": [{"name": "GenerateStructuredOutput",',
+    '       "input": "{\\"cards\\": [{\\"sku_id\\": \\"P3472-S1\\" …}]}"}]},',
+    "    …",
+    "  ]",
+    "}",
+  ].map((t, i) => `<div class="ln"><span class="no">${i + 1}</span><span>${esc(t)}</span></div>`).join("");
+
+  // ---------- 校验规则表 ----------
+  const RULES = [
+    ["摘要提到来源里没有的 SKU", "mentioned − (source ∪ retained ∪ previous)", "bad", "回滚：编造"],
+    ["摘要提到某 SKU，但价格数字对不上", "价格不在摘要数字集合里", "bad", "回滚：价格错配"],
+    ["摘要提的商品来自上一版摘要", "previous_summary 也算合法来源", "ok", "通过"],
+    ["摘要写得很概括、漏掉商品", "不做覆盖性检查", "ok", "通过（附录补全）"],
+    ["摘要格式非法 / 结构不符 schema", "AgentScope 侧抛错", "warn", "回滚：摘要失败"],
+  ];
+  $("validate").innerHTML =
+    `<div class="trow head"><span>摘要里的情况</span><span>判定依据</span><span>结果</span><span></span></div>` +
+    RULES.map(([a, b, k, c]) =>
+      `<div class="trow"><span class="sc">${a}</span><span class="bh">${esc(b)}</span>` +
+      `<span class="tstat ${k}">${k === "ok" ? "ALLOW" : k === "bad" ? "REJECT" : "ROLLBACK"}</span>` +
+      `<span class="bh">${c}</span></div>`).join("");
+
+  $("validatecode").innerHTML = [
+    "# context_governance.py — 只查两个方向",
+    "allowed = SKUs(source) | SKUs(retained) | SKUs(previous_summary)",
+    "violations = [f\"摘要提到来源中不存在的商品 {sku}\"",
+    "              for sku in mentioned - allowed]",
+    "",
+    "# 价格：先剥掉 SKU 形状，再取摘要里的全部数字",
+    "numbers = {round(float(n), 2) for n in NUMBER.findall(SKU_PATTERN.sub(\" \", text))}",
+    "for sku in mentioned:",
+    "    if fact.price_major is not None and round(fact.price_major, 2) not in numbers:",
+    "        violations.append(f\"商品 {sku} 的价格与来源不一致\")",
+  ].map((t, i) =>
+    `<div class="ln"><span class="no">${i + 1}</span><span>${t.startsWith("#") ? `<span class="c">${esc(t)}</span>` : esc(t)}</span></div>`).join("");
+
+  // ---------- 保护边界代码 ----------
+  $("boundarycode").innerHTML = [
+    "# 倒数第 2 条 user 消息及其后全部消息 = 保护区",
+    "protected = context[user_indexes[-protect_turns]:]",
+    "",
+    "# 让内置切分至少保留 system + 保护尾部的 token",
+    "needed  = (system_tokens + tail_tokens) / model.context_size",
+    "reserve = min(max(config.reserve_ratio, needed), trigger - 0.01)",
+    "config  = config.model_copy(update={\"reserve_ratio\": reserve,",
+    "                                  \"compression_fallback_to_truncation\": False})",
+    "",
+    "# 压缩后：消息 id 要在，消息里的每个 block id 也要在",
+    "kept = {msg.id: msg for msg in after_context}",
+    "for msg in protected:",
+    "    if msg.id not in kept: return False",
+    "    if any(b.id not in kept[msg.id].block_ids for b in msg.blocks): return False",
+  ].map((t, i) =>
+    `<div class="ln"><span class="no">${i + 1}</span><span>${t.startsWith("#") ? `<span class="c">${esc(t)}</span>` : esc(t)}</span></div>`).join("");
+
+  // ---------- 闸门代码 ----------
+  $("gatecode").innerHTML = [
+    "# on_model_call：每次真实模型调用前",
+    "if self._gate_error is not None:",
+    "    raise self._gate_error              # 重试循环里立即失败",
+    "",
+    "limit  = int(model.context_size * 0.85)",
+    "tokens = await model.count_tokens(messages, tools)",
+    "if tokens <= limit:",
+    "    return await next_handler(**input_kwargs)",
+    "",
+    "# 超限：强制压缩一次（trigger ≈ 0），再重新计数",
+    "await agent.compress_context(context_config=force)",
+    "prepared = await agent._prepare_model_input()",
+    "if await model.count_tokens(prepared[\"messages\"]) > limit:",
+    "    self._gate_error = ContextCapacityError(tokens, limit)",
+    "    raise self._gate_error              # → 路由 507",
+    "return await next_handler(**{**input_kwargs, **prepared})",
+  ].map((t, i) =>
+    `<div class="ln"><span class="no">${i + 1}</span><span>${t.startsWith("#") ? `<span class="c">${esc(t)}</span>` : esc(t)}</span></div>`).join("");
+
+  // ---------- 回归代码 ----------
+  $("toolfailcode").innerHTML = [
+    "# 回合开始前：已有的 tool_result id",
+    "known = {b.id for msg in state.context",
+    "         for b in msg.get_content_blocks(\"tool_result\")}",
+    "",
+    "# 回合结束后：只看新出现的 id",
+    "for msg in state.context:",
+    "    for b in msg.get_content_blocks(\"tool_result\"):",
+    "        if b.id in known:",
+    "            continue",
+    "        if b.state == ToolResultState.ERROR:",
+    "            raise ToolFailureError()",
+  ].map((t, i) =>
+    `<div class="ln"><span class="no">${i + 1}</span><span>${t.startsWith("#") ? `<span class="c">${esc(t)}</span>` : esc(t)}</span></div>`).join("");
+
+  $("turncode").innerHTML = [
+    "key = \"harbor.context_governance\"",
+    "bucket = state.middle_context.setdefault(key, {})",
+    "if \"turn_count\" not in bucket:",
+    "    # 旧快照：用现有 user 消息补种",
+    "    bucket[\"turn_count\"] = count_user_messages(state.context)",
+    "bucket[\"turn_count\"] += 1",
+    "",
+    "# 写快照 / 写流水都优先读它；回退到派生计数",
+    "turn = recorded_turn_count(state) or derived_count(state)",
+  ].map((t, i) =>
+    `<div class="ln"><span class="no">${i + 1}</span><span>${t.startsWith("#") ? `<span class="c">${esc(t)}</span>` : esc(t)}</span></div>`).join("");
+
+  // ---------- 配置 ----------
+  const CONFIG = [
+    ["HARBOR_CONTEXT_TRIGGER_RATIO", "0.60", "达到窗口的这个比例开始正常压缩；必须早于闸门，给摘要调用留余量。", "info"],
+    ["HARBOR_CONTEXT_GATE_RATIO", "0.85", "硬上限。超过即强制压缩，压完仍超 → 507。", "warn"],
+    ["HARBOR_CONTEXT_PROTECT_TURNS", "2", "最近几轮用户消息（及其后全部消息）不参与压缩。", "ok"],
+    ["HARBOR_CONTEXT_ARCHIVE_DIR", "data/sessions/archives", "归档根目录；默认在会话根目录下，随 data/ 一起 git-ignore。", "ok"],
+  ];
+  $("config").innerHTML =
+    `<div class="trow head"><span>变量</span><span>默认</span><span>作用</span><span></span></div>` +
+    CONFIG.map(([k, v, d, s]) =>
+      `<div class="trow"><span class="bh">${k}</span><span class="sc">${v}</span>` +
+      `<span class="bh">${d}</span><span class="tstat ${s}">S7</span></div>`).join("");
+
+  // ---------- 测试 ----------
+  const TESTS = [
+    ["归档", "写 JSON + 返回指针；每批新序号；会话 id 安全化", "文件与指针格式"],
+    ["归档", "read 渲染消息；未知指针返回 error 而不抛", "模型侧可读性"],
+    ["归档", "工具结果单独成文件", "Offloader 协议完整"],
+    ["事实", "从结构化输出工具调用提取 SKU / 价格", "附录数据来源"],
+    ["校验", "编造 SKU → 违规；价格错配 → 违规；忠实摘要 → 通过", "两条核心规则"],
+    ["校验", "上一版摘要里的 SKU 合法", "跨轮延续不误伤"],
+    ["附录", "幂等；块状摘要也处理；价格逐字", "重复压缩不堆叠"],
+    ["压缩", "关闭截断兜底；reserve 覆盖保护尾部", "边界第一道"],
+    ["压缩", "追加事实附录；无归档时 no-op", "正常路径"],
+    ["回滚", "编造 SKU / 摘要报错 / 保护尾部被丢", "三条失败路径"],
+    ["回滚", "保护消息被 block 级切分", "第二道复核"],
+    ["闸门", "未超 → 原样转发；超 → 强制压缩后转发", "两个分支"],
+    ["闸门", "仍超 → 抛错且从不调用模型", "容量是保证"],
+    ["闸门", "重试立即失败；下轮 on_reply 复位", "不重复烧 API"],
+    ["接线", "run_turn 透传 507；router 映射 507", "错误不被包成 502"],
+    ["计数", "计数跨压缩不倒退", "S6 回归修复"],
+    ["真实", "真 Agent + 真切分：归档、附录、保留尾部", "不变量在真实现下成立"],
+    ["真实", "真 Agent：编造 SKU 触发整份回滚", "同上，失败分支"],
+  ];
+  $("tests").innerHTML =
+    `<div class="trow head"><span>面</span><span>用例</span><span>钉住什么</span><span></span></div>` +
+    TESTS.map(([a, b, c]) =>
+      `<div class="trow"><span class="bh">${a}</span><span class="sc">${b}</span>` +
+      `<span class="bh">${c}</span><span class="tstat ok">PASS</span></div>`).join("");
+
+  // ---------- 失败语义 ----------
+  const FAILURES = [
+    ["摘要模型报错", "next_handler 抛出 → 回滚", "—", "本轮继续（若未超限）或 507", "warn"],
+    ["摘要编造 SKU / 价格错配", "validate_summary → 回滚", "—", "同上；归档成为孤儿", "warn"],
+    ["保护尾部被切 / block 被拆", "_boundary_kept → 回滚", "—", "同上", "warn"],
+    ["归档写失败", "压缩整体失败 → 回滚", "—", "同上", "warn"],
+    ["强制压缩后仍超闸门", "ContextCapacityError", "507", "本轮不落盘，会话逐出", "bad"],
+    ["重试循环再次进入", "_gate_error 已置位 → 立即抛", "507", "不再压缩、不再调模型", "bad"],
+    ["read_archive 指针无效", "返回可读 error JSON", "—", "模型放弃回查，回合不炸", "ok"],
+    ["校验回滚留下归档", "文件保留，摘要无指针", "—", "可审计，不参与恢复", "ok"],
+  ];
+  $("failures").innerHTML =
+    `<div class="trow head"><span>场景</span><span>代码行为</span><span>HTTP</span><span>结果</span></div>` +
+    FAILURES.map(([a, b, c, d, k]) =>
+      `<div class="trow"><span class="sc">${a}</span><span class="bh">${esc(b)}</span>` +
+      (c === "—"
+        ? `<span class="bh">—</span>`
+        : `<span class="tstat ${k}">${c}</span>`) +
+      `<span class="bh">${d}</span></div>`).join("");
+
+  // ---------- 重放 ----------
+  const BASE_ARCHIVE = ["0001-context.json", "0002-context.json"];
+  const OLD_SUMMARY = "用户看过 3 款猫包；P3472-S1 ¥567.00 已展示。";
+
+  const STEPS = [
+    {
+      title: "第 7 轮开始之前",
+      note: "context 14 条，窗口占用 0.62；摘要来自上一次压缩；<b>turn_count = 6</b>。归档里已有两批。",
+      ctx: 14, turn: 6, summary: OLD_SUMMARY,
+      archive: BASE_ARCHIVE.slice(), tokens: 0.62, gate: "open",
+    },
+    {
+      title: "on_reply",
+      note: "<b>先清闸门标志</b>（属于上一轮的失败不该拖累这一轮），<b>再把 turn_count 写成 7</b>。这一步发生在任何模型调用之前。",
+      ctx: 14, turn: 7, summary: OLD_SUMMARY,
+      archive: BASE_ARCHIVE.slice(), tokens: 0.62, gate: "open",
+    },
+    {
+      title: "工具返回之后",
+      note: "product_search 与结构化输出各追加一轮消息，context 变成 16 条，窗口占用升到 <b>0.88</b>——越过 0.85 的闸门。",
+      ctx: 16, turn: 7, summary: OLD_SUMMARY,
+      archive: BASE_ARCHIVE.slice(), tokens: 0.88, gate: "over",
+    },
+    {
+      title: "on_model_call：第一次计数",
+      note: "<code>count_tokens(messages, tools)</code> = 0.88 &gt; 0.85。<b>不转发</b>，用 <code>trigger_ratio≈0.01</code> 调一次 <code>agent.compress_context()</code>。",
+      ctx: 16, turn: 7, summary: OLD_SUMMARY,
+      archive: BASE_ARCHIVE.slice(), tokens: 0.88, gate: "over",
+    },
+    {
+      title: "on_compress_context：保护边界",
+      note: "保护区 = 最近 2 条 user 消息及其后 4 条。量出 system + 尾部约占 0.31，把 <code>reserve_ratio</code> 从 0.20 抬到 0.31；同时强制关闭截断兜底。",
+      ctx: 16, turn: 7, summary: OLD_SUMMARY,
+      archive: BASE_ARCHIVE.slice(), tokens: 0.88, gate: "over",
+    },
+    {
+      title: "内置切分",
+      note: "AgentScope 按比例切开：<b>12 条进压缩区</b>，4 条留在 context。保护区完整落在保留侧——但还要事后复核。",
+      ctx: 16, turn: 7, summary: OLD_SUMMARY,
+      archive: BASE_ARCHIVE.slice(), tokens: 0.88, gate: "over",
+    },
+    {
+      title: "归档：写文件、拿指针",
+      note: "<code>offload_context(session, 12 条)</code> 写出 <b>0003-context.json</b> 并返回 <code>archive://s7-demo/0003</code>。AgentScope 把指针拼进摘要。",
+      ctx: 4, turn: 7, summary: OLD_SUMMARY + "\n[archive://s7-demo/0003]",
+      archive: [...BASE_ARCHIVE, "0003-context.json"], tokens: 0.41, gate: "open", newArchive: "0003-context.json",
+    },
+    {
+      title: "摘要生成",
+      note: "摘要模型输出：「用户看过猫包，之前推荐过 <b>P9999-S1</b>，价格 ¥320.00……」——这个 SKU 从未在原文出现过。",
+      ctx: 4, turn: 7, summary: "之前推荐过 P9999-S1（¥320.00），还有两款猫包。",
+      archive: [...BASE_ARCHIVE, "0003-context.json"], tokens: 0.41, gate: "open",
+    },
+    {
+      title: "校验：边界通过，来源不通过",
+      note: "保护尾部逐条、逐 block 都在 → 边界 OK。但 <b>P9999-S1</b> 不在「被压缩原文 ∪ 保留尾部 ∪ 旧摘要」里 → 违规。",
+      ctx: 4, turn: 7, summary: "之前推荐过 P9999-S1（¥320.00），还有两款猫包。",
+      archive: [...BASE_ARCHIVE, "0003-context.json"], tokens: 0.41, gate: "open",
+      violation: "摘要提到来源中不存在的商品 P9999-S1",
+    },
+    {
+      title: "回滚",
+      note: "恢复压缩前的 <code>context</code>（16 条）与 <code>summary</code>（旧摘要）。指针随摘要一起消失；<b>归档文件保留</b>，成为可审计的孤儿。",
+      ctx: 16, turn: 7, summary: OLD_SUMMARY,
+      archive: [...BASE_ARCHIVE, "0003-context.json"], tokens: 0.88, gate: "over",
+      orphan: "0003-context.json",
+    },
+    {
+      title: "重计数：仍然超限",
+      note: "<code>_prepare_model_input()</code> 重新取 messages/tools，数出来还是 <b>0.88 &gt; 0.85</b>。置 <code>_gate_error = ContextCapacityError</code> 并抛出。",
+      ctx: 16, turn: 7, summary: OLD_SUMMARY,
+      archive: [...BASE_ARCHIVE, "0003-context.json"], tokens: 0.88, gate: "tripped",
+      orphan: "0003-context.json",
+    },
+    {
+      title: "重试循环再次进入",
+      note: "AgentScope 捕获异常并重试。<code>on_model_call</code> 看到 <code>_gate_error</code> 已置位，<b>立即抛</b>——不再压缩、不再计数、不再调用模型。",
+      ctx: 16, turn: 7, summary: OLD_SUMMARY,
+      archive: [...BASE_ARCHIVE, "0003-context.json"], tokens: 0.88, gate: "tripped",
+      orphan: "0003-context.json",
+    },
+    {
+      title: "路由：507",
+      note: "<code>run_turn</code> 显式透传容量异常，路由映射为 <b>507「上下文超出容量闸门」</b>。本轮不写快照、不写流水，会话被逐出。",
+      ctx: 16, turn: 7, summary: OLD_SUMMARY,
+      archive: [...BASE_ARCHIVE, "0003-context.json"], tokens: 0.88, gate: "failed",
+      orphan: "0003-context.json",
+    },
+  ];
+
+  let step = 0;
+
+  function render() {
+    const s = STEPS[step];
+    $("stepno").textContent = `step ${step} / ${STEPS.length - 1}`;
+    $("narration").innerHTML = `<b>${esc(s.title)}</b> — ${s.note}`;
+    $("next").disabled = step >= STEPS.length - 1;
+
+    // 状态
+    const summaryBad = s.violation !== undefined;
+    $("lane-state").innerHTML =
+      `<div class="jline">context · <b>${s.ctx}</b> 条消息</div>` +
+      `<div class="jline">turn_count · <b>${s.turn}</b></div>` +
+      `<div class="snapbox${summaryBad ? " bad" : ""}"><span class="k">summary</span><br>${esc(s.summary)}</div>` +
+      (s.violation
+        ? `<div class="jline bad">✗ ${esc(s.violation)}</div>`
+        : "");
+
+    // 归档
+    $("lane-archive").innerHTML = s.archive.map(f => {
+      const isNew = s.newArchive === f;
+      const isOrphan = s.orphan === f;
+      const cls = isNew ? " new" : isOrphan ? " bad" : " ok";
+      const note = isNew ? " ← 本批" : isOrphan ? " ← 孤儿（无指针）" : "";
+      return `<div class="jline${cls}">${esc(f)}${note}</div>`;
+    }).join("");
+
+    // 闸门
+    const pct = Math.min(100, Math.round(s.tokens * 100));
+    const gatestat = {
+      open: [`ok`, "闸门内 · 允许转发"],
+      over: [`over`, "超闸门 · 先压缩"],
+      tripped: [`bad`, "已置位 · 重试立即失败"],
+      failed: [`bad`, "本轮失败 · 507"],
+    }[s.gate];
+    $("lane-gate").innerHTML =
+      `<div class="meter"><div class="meter-fill${s.tokens > 0.85 ? " over" : ""}" style="width:${pct}%"></div>` +
+      `<div class="meter-gate" style="left:85%"></div>` +
+      `<div class="meter-label">${pct}% / 85%</div></div>` +
+      `<div class="gatestat ${gatestat[0]}">${gatestat[1]}</div>` +
+      `<div class="jline">limit = 0.85 × context_size</div>` +
+      `<div class="jline">trigger = 0.60 · 强制时 0.01</div>`;
+  }
+
+  $("next").addEventListener("click", () => { if (step < STEPS.length - 1) { step++; render(); } });
+  $("reset").addEventListener("click", () => { step = 0; render(); });
+  render();
+</script>

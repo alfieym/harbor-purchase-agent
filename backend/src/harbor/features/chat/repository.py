@@ -17,6 +17,7 @@ from typing import Any
 
 from agentscope.state import AgentState
 
+from harbor.agents.context_governance import recorded_turn_count
 from harbor.features.chat.schemas import CommerceIntentResponse, SessionSummary
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,12 @@ class SessionRepository:
 
     @staticmethod
     def _turn_count(state: AgentState) -> int:
+        # S7 compression removes old user messages from ``context``; the
+        # middleware's durable counter wins when present (S6 snapshots and
+        # test stubs without it fall back to the derived count).
+        recorded = recorded_turn_count(state)
+        if recorded:
+            return recorded
         return sum(1 for msg in state.context if getattr(msg, "role", None) == "user")
 
     def _read_envelope(self, path: Path) -> dict[str, Any]:

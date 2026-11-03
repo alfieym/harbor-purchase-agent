@@ -4,6 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
 
+from harbor.agents.context_governance import ContextCapacityError
 from harbor.core.config import Settings
 from harbor.features.chat.repository import (
     SessionRepository,
@@ -41,6 +42,8 @@ async def intents(request: CommerceIntentRequest, http_request: Request) -> Comm
             request.raw_query,
             timeout_seconds=settings.turn_timeout_seconds,
         )
+    except ContextCapacityError as exc:
+        raise HTTPException(status_code=507, detail="上下文超出容量闸门") from exc
     except ModelTimeoutError as exc:
         raise HTTPException(
             status_code=504, detail=f"模型调用超时（>{exc.timeout_seconds}s）"

@@ -10,7 +10,13 @@ import json
 import logging
 
 import pytest
-from agentscope.message import Msg, TextBlock, ToolResultState, UserMsg
+from agentscope.message import (
+    Msg,
+    TextBlock,
+    ToolResultBlock,
+    ToolResultState,
+    UserMsg,
+)
 from agentscope.state import AgentState
 
 from harbor.features.chat.repository import SessionRepository, SnapshotWriteError
@@ -585,3 +591,46 @@ def test_same_session_concurrent_turns_persist_both(tmp_path) -> None:
     assert restored is not None and len(restored.context) == 4
     journal = (tmp_path / "journal.jsonl").read_text(encoding="utf-8").strip().split("\n")
     assert len(journal) == 4
+
+
+class CompressingAgent:
+    """A real ``AgentState`` whose reply compresses away the old context.
+
+    S7 compresses in the middle of a turn, so ``context_start`` (captured
+    before the reply) can point past the end of the shrunk list. Tool failures
+    must still be attributed to this turn.
+    """
+
+    def __init__(self) -> None:
+        self.state = AgentState()
+        self.state.context = [UserMsg(name="user", content=f"old {i}") for i in range(10)]
+
+    async def reply(self, msg, structured_schema=None) -> Msg:
+        self.state.context = [msg]
+        self.state.context.append(
+            Msg(
+                name="purchase_agent",
+                role="assistant",
+                content=[
+                    ToolResultBlock(
+                        id="call-1",
+                        name="product_search",
+                        output="boom",
+                        state=ToolResultState.ERROR,
+                    )
+                ],
+            )
+        )
+        return Msg(
+            name="purchase_agent",
+            role="assistant",
+            content=[TextBlock(text="我猜的")],
+            structured_output={"summary": "x", "cards": []},
+        )
+
+
+def test_run_turn_detects_tool_failure_after_mid_turn_compression() -> None:
+    store = SessionStore(agent_factory=lambda state=None: CompressingAgent())
+
+    with pytest.raises(ToolFailureError):
+        asyncio.run(run_turn(store, "u1", "s1", "给猫买个饮水器"))

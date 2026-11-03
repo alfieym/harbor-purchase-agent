@@ -13,15 +13,20 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from agentscope.agent import Agent, ReActConfig
+from agentscope.agent import Agent, ContextConfig, ReActConfig
 from agentscope.model import ChatModelBase
 from agentscope.state import AgentState
 from agentscope.tool import Toolkit
 from qdrant_client import QdrantClient
 
+from harbor.agents.context_governance import (
+    ContextGovernanceMiddleware,
+    SessionArchiveOffloader,
+    make_read_archive_tool,
+)
 from harbor.agents.models import build_chat_model
 from harbor.agents.permissions import allow_product_search_tool
-from harbor.agents.prompts import system_prompt_for
+from harbor.agents.prompts import SUMMARY_TEMPLATE, system_prompt_for
 from harbor.agents.tools import make_product_search_tool
 from harbor.core.config import Settings
 from harbor.features.catalog.models import Product
@@ -159,23 +164,59 @@ def build_agent(runtime: AgentRuntime, state: AgentState | None = None) -> Agent
     ``state`` restores a previous session's full conversation (S6): the store
     passes the snapshot it loaded from disk, or ``None`` for a brand-new session.
     """
+    settings = runtime.settings
+    # S7-5: ``legacy`` is the pre-S7 baseline — no middleware, no archive tool,
+    # and AgentScope's own compression defaults. ``governed`` wraps every
+    # compression and every model call with the S7 guarantees.
+    governed = settings.context_strategy == "governed"
+    prompt = system_prompt_for(runtime.categories, archive_enabled=governed)
     tool = make_product_search_tool(runtime.service)
-    agent = Agent(
-        name="purchase_agent",
-        system_prompt=system_prompt_for(runtime.categories),
-        model=runtime.model,
-        toolkit=Toolkit([tool]),
-        state=state,
-        # ``interruption_raise_cancelled_error=True``: when ``run_turn``'s
-        # ``asyncio.wait_for`` cancels a turn at the timeout budget, AgentScope
-        # otherwise swallows the CancelledError and returns an "INTERRUPTED"
-        # reply — so no TimeoutError surfaces and the timeout silently becomes
-        # a 502. Re-raising keeps the timeout path clean (S5-2).
-        react_config=ReActConfig(
-            max_iters=15,
-            interruption_raise_cancelled_error=True,
-        ),
-    )
+    if not governed:
+        agent = Agent(
+            name="purchase_agent",
+            system_prompt=prompt,
+            model=runtime.model,
+            toolkit=Toolkit([tool]),
+            state=state,
+            # ``interruption_raise_cancelled_error=True``: when ``run_turn``'s
+            # ``asyncio.wait_for`` cancels a turn at the timeout budget,
+            # AgentScope otherwise swallows the CancelledError and returns an
+            # "INTERRUPTED" reply — so no TimeoutError surfaces and the timeout
+            # silently becomes a 502. Re-raising keeps the timeout path clean.
+            react_config=ReActConfig(
+                max_iters=15,
+                interruption_raise_cancelled_error=True,
+            ),
+        )
+    else:
+        # S7: every compression is archived + validated, and every model call is
+        # measured against the hard gate before it leaves the process.
+        offloader = SessionArchiveOffloader(settings.context_archive_dir)
+        governance = ContextGovernanceMiddleware(
+            offloader=offloader,
+            protect_turns=settings.context_protect_turns,
+            gate_ratio=settings.context_gate_ratio,
+        )
+        agent = Agent(
+            name="purchase_agent",
+            system_prompt=prompt,
+            model=runtime.model,
+            toolkit=Toolkit([tool, make_read_archive_tool(offloader)]),
+            middlewares=[governance],
+            state=state,
+            offloader=offloader,
+            context_config=ContextConfig(
+                trigger_ratio=settings.context_trigger_ratio,
+                compression_fallback_to_truncation=False,
+                summary_template=SUMMARY_TEMPLATE,
+            ),
+            # ``interruption_raise_cancelled_error=True``: same S5-2 reason as
+            # the legacy branch above.
+            react_config=ReActConfig(
+                max_iters=15,
+                interruption_raise_cancelled_error=True,
+            ),
+        )
     # Without this the loop parks every tool call on a permission prompt.
     allow_product_search_tool(agent)
     return agent

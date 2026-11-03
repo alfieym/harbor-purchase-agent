@@ -82,6 +82,21 @@ class Settings(BaseSettings):
     # (repo-root anchored, matching ``DEFAULT_DATA_PATH`` in factory.py).
     sessions_dir: Path = Path(__file__).resolve().parents[4] / "data" / "sessions"
 
+    # S7: context governance. Compression starts early enough to leave room for
+    # the summary call itself; the gate is the hard ceiling a turn must fit in.
+    # ``legacy`` turns the whole middleware off and falls back to AgentScope's
+    # built-in compression, which is the pre-S7 baseline (S7-5).
+    context_strategy: Literal["governed", "legacy"] = Field(
+        default="governed",
+        validation_alias=AliasChoices("HARBOR_CONTEXT_STRATEGY", "CONTEXT_STRATEGY"),
+    )
+    context_trigger_ratio: float = Field(default=0.6, gt=0, le=0.9)
+    context_gate_ratio: float = Field(default=0.85, gt=0, le=1.0)
+    context_protect_turns: int = Field(default=2, ge=1)
+    context_archive_dir: Path = (
+        Path(__file__).resolve().parents[4] / "data" / "sessions" / "archives"
+    )
+
     @property
     def is_development(self) -> bool:
         return self.app_env == "development"

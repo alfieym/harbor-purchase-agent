@@ -26,21 +26,43 @@ SYSTEM_PROMPT = """\
 - 价格一律用命中里的 price_major + currency（工具已把最低价 SKU 换算成目标币种）。
   直接原样引用，不要自行再次换算、也不要改币种。
 - 只展示 hits 里的真实商品，不要编造不存在的商品。
-- 输出必须符合给定的结构化 schema（商品卡列表 + 一句话 summary）。
+{archive_guidance}- 输出必须符合给定的结构化 schema（商品卡列表 + 一句话 summary）。
 """
 
+ARCHIVE_GUIDANCE = """\
+- 只声明你确实在本会话里推荐过的商品。上下文被压缩后，摘要里会出现 archive:// 指针；
+  不确定之前推荐过什么时，先调用 read_archive(archive_id) 回查原文，不要凭记忆复述。
+"""
 
-def system_prompt_for(categories: Sequence[str]) -> str:
+# S7-2: the five summary fields the acceptance checklist names, in Chinese so
+# the rendered summary is legible to the model and to a human reading a snapshot.
+SUMMARY_TEMPLATE = (
+    "<system-info>以下是对你此前工作的压缩摘要\n"
+    "# 目标\n{task_overview}\n\n"
+    "# 当前进展\n{current_state}\n\n"
+    "# 关键事实\n{important_discoveries}\n\n"
+    "# 下一步\n{next_steps}\n\n"
+    "# 必须保留\n{context_to_preserve}\n"
+    "</system-info>"
+)
+
+
+def system_prompt_for(categories: Sequence[str], *, archive_enabled: bool = True) -> str:
     """Append the catalog's real category vocabulary to the system prompt.
 
     Without it the model invents plausible categories (「家用电器」) that the
     catalog does not have, the hard filter rejects every candidate, and the
     user gets "no results" for a query that would otherwise hit.
+
+    ``archive_enabled=False`` is the ``legacy`` strategy: no archive middleware,
+    no ``read_archive`` tool, so the prompt must not mention either.
     """
+    guidance = ARCHIVE_GUIDANCE if archive_enabled else ""
+    prompt = SYSTEM_PROMPT.replace("{archive_guidance}", guidance)
     vocabulary = sorted(set(categories))
     if not vocabulary:
-        return SYSTEM_PROMPT
+        return prompt
     return (
-        f"{SYSTEM_PROMPT}\n目录中的商品类目只有：{'、'.join(vocabulary)}。"
+        f"{prompt}\n目录中的商品类目只有：{'、'.join(vocabulary)}。"
         "category 必须是其中之一，或省略。"
     )

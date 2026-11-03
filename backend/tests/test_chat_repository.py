@@ -3,10 +3,11 @@
 import json
 
 import pytest
-from agentscope.message import Msg, TextBlock
+from agentscope.message import Msg, TextBlock, UserMsg
 from agentscope.state import AgentState
 
 from harbor.agents.cards import ProductCard
+from harbor.agents.context_governance import GOVERNANCE_STATE_KEY
 from harbor.features.chat.repository import (
     SessionRepository,
     SnapshotLoadError,
@@ -199,3 +200,16 @@ def test_append_journal_includes_cards(tmp_path):
         (tmp_path / "journal.jsonl").read_text(encoding="utf-8").strip().split("\n")[1]
     )
     assert second["cards"][0]["sku_id"] == "X1-S1"
+
+
+def test_save_uses_the_recorded_turn_count_when_context_was_compressed(tmp_path) -> None:
+    """S7 compression shrinks ``context``; the turn counter must not reset."""
+    repo = SessionRepository(tmp_path)
+    state = AgentState()
+    state.context = [UserMsg(name="user", content="only the retained turn")]
+    state.middle_context[GOVERNANCE_STATE_KEY] = {"turn_count": 7}
+
+    repo.save(("u1", "s1"), state)
+
+    document = json.loads(repo.snapshot_path(("u1", "s1")).read_text(encoding="utf-8"))
+    assert document["turn_count"] == 7
