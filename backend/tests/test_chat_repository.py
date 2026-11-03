@@ -7,7 +7,11 @@ from agentscope.message import Msg, TextBlock
 from agentscope.state import AgentState
 
 from harbor.agents.cards import ProductCard
-from harbor.features.chat.repository import SessionRepository, SnapshotWriteError
+from harbor.features.chat.repository import (
+    SessionRepository,
+    SnapshotLoadError,
+    SnapshotWriteError,
+)
 from harbor.features.chat.schemas import CommerceIntentResponse
 
 
@@ -40,20 +44,84 @@ def test_load_returns_none_when_missing(tmp_path):
     assert SessionRepository(tmp_path).load(("u1", "s1")) is None
 
 
-def test_load_returns_none_when_corrupt(tmp_path):
+def test_load_raises_on_corrupt_snapshot(tmp_path):
+    """S6-3: a hand-broken snapshot must fail loudly, never look like a new session."""
     repo = SessionRepository(tmp_path)
     path = repo.snapshot_path(("u1", "s1"))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not valid json", encoding="utf-8")
-    assert repo.load(("u1", "s1")) is None
+    with pytest.raises(SnapshotLoadError):
+        repo.load(("u1", "s1"))
 
 
-def test_load_returns_none_on_unknown_schema_version(tmp_path):
+def test_load_keeps_corrupt_file_for_inspection(tmp_path):
+    repo = SessionRepository(tmp_path)
+    path = repo.snapshot_path(("u1", "s1"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not valid json", encoding="utf-8")
+    with pytest.raises(SnapshotLoadError):
+        repo.load(("u1", "s1"))
+    assert path.exists()  # 不静默删除，留给人排查
+
+
+def test_load_raises_on_unknown_schema_version(tmp_path):
     repo = SessionRepository(tmp_path)
     path = repo.snapshot_path(("u1", "s1"))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"schema_version": 999, "state": {}}), encoding="utf-8")
-    assert repo.load(("u1", "s1")) is None
+    with pytest.raises(SnapshotLoadError):
+        repo.load(("u1", "s1"))
+
+
+def test_load_raises_when_state_payload_is_invalid(tmp_path):
+    repo = SessionRepository(tmp_path)
+    path = repo.snapshot_path(("u1", "s1"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"schema_version": 1, "state": {"context": "not-a-list"}}), encoding="utf-8"
+    )
+    with pytest.raises(SnapshotLoadError):
+        repo.load(("u1", "s1"))
+
+
+def _envelope(buyer: str, session: str, at: str, turns: int) -> dict:
+    return {
+        "schema_version": 1,
+        "buyer_id": buyer,
+        "shopping_session_id": session,
+        "last_active_at": at,
+        "turn_count": turns,
+        "state": AgentState().model_dump(mode="json"),
+    }
+
+
+def _write(repo: SessionRepository, key, doc: dict) -> None:
+    path = repo.snapshot_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_list_sessions_filters_by_buyer_and_sorts_desc(tmp_path):
+    """S6-5: only the buyer's sessions, newest last_active_at first."""
+    repo = SessionRepository(tmp_path)
+    _write(repo, ("u1", "old"), _envelope("u1", "old", "2026-11-01T10:00:00+00:00", 1))
+    _write(repo, ("u1", "new"), _envelope("u1", "new", "2026-11-03T10:00:00+00:00", 3))
+    _write(repo, ("u1", "mid"), _envelope("u1", "mid", "2026-11-02T10:00:00+00:00", 2))
+    _write(repo, ("u2", "other"), _envelope("u2", "other", "2026-11-04T10:00:00+00:00", 9))
+
+    assert [s.shopping_session_id for s in repo.list_sessions("u1")] == ["new", "mid", "old"]
+
+
+def test_list_sessions_reports_turn_count(tmp_path):
+    repo = SessionRepository(tmp_path)
+    repo.save(("u1", "s1"), _state())
+    [summary] = repo.list_sessions("u1")
+    assert summary.turn_count == 1  # _state() 里恰好一条 role=="user"
+    assert summary.last_active_at is not None
+
+
+def test_list_sessions_empty_when_no_snapshots(tmp_path):
+    assert SessionRepository(tmp_path).list_sessions("u1") == []
 
 
 def test_snapshot_paths_are_isolated_per_key(tmp_path):

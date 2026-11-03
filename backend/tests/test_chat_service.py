@@ -6,6 +6,7 @@ reply→cards parsing exactly.
 """
 
 import asyncio
+import json
 import logging
 
 import pytest
@@ -88,8 +89,10 @@ class FakeAgent:
 class PersistingAgent:
     """Stub backed by a real ``AgentState``, so ``persist`` can serialize it."""
 
-    def __init__(self, output: dict | None = None, text: str = "") -> None:
-        self.state = AgentState()
+    def __init__(
+        self, output: dict | None = None, text: str = "", state: AgentState | None = None
+    ) -> None:
+        self.state = state if state is not None else AgentState()
         self._output = output
         self._text = text
 
@@ -494,3 +497,91 @@ def test_persist_logs_snapshot_write_failure(tmp_path, caplog) -> None:
         with pytest.raises(SnapshotWriteError):
             asyncio.run(store.persist(("u1", "s1"), agent, "hi", response))
     assert any("snapshot write failed" in r.message for r in caplog.records)
+
+
+# --------------------------------------------------------------------------
+# S6 acceptance: restart continuity, journal turn numbering, persistence
+# under same-session concurrency.
+# --------------------------------------------------------------------------
+
+
+def _restart(tmp_path, seen: list[tuple[AgentState | None, int]]) -> SessionStore:
+    """A fresh process: new SessionStore over the same on-disk repository.
+
+    Captures the state *as the factory received it* (a live reference would keep
+    growing as the new turn appends messages).
+    """
+
+    def factory(state: AgentState | None = None) -> PersistingAgent:
+        seen.append((state, len(state.context) if state is not None else 0))
+        return PersistingAgent(output=_cards_dict(), state=state)
+
+    return SessionStore(agent_factory=factory, repository=SessionRepository(tmp_path))
+
+
+def test_restart_restores_previous_turns_and_continues(tmp_path) -> None:
+    """S6-1/S6-6: after a process restart the next turn sees the full history."""
+    repo = SessionRepository(tmp_path)
+    store1 = SessionStore(
+        agent_factory=lambda state=None: PersistingAgent(output=_cards_dict()),
+        repository=repo,
+    )
+    asyncio.run(run_turn(store1, "u1", "s1", "给猫买个饮水器"))
+
+    seen: list[tuple[AgentState | None, int]] = []
+    asyncio.run(run_turn(_restart(tmp_path, seen), "u1", "s1", "刚才第一个多少钱"))
+
+    state, restored_count = seen[0]
+    assert state is not None
+    assert restored_count == 2  # 上一轮的 user + assistant 都回来了
+    assert state.context[0].get_text_content() == "给猫买个饮水器"
+    # S6-6: 上一轮推荐的具体商品仍在结构化输出里
+    assert state.context[1].structured_output["cards"][0]["sku_id"] == "X1-S1"
+
+    restored = repo.load(("u1", "s1"))
+    assert restored is not None and len(restored.context) == 4
+
+
+def test_journal_row_count_matches_turns_across_restart(tmp_path) -> None:
+    """S6-2: exactly 2 journal rows per successful turn, turn numbers continue."""
+    repo = SessionRepository(tmp_path)
+    store1 = SessionStore(
+        agent_factory=lambda state=None: PersistingAgent(output=_cards_dict()),
+        repository=repo,
+    )
+    asyncio.run(run_turn(store1, "u1", "s1", "q1"))
+
+    seen: list[tuple[AgentState | None, int]] = []
+    store2 = _restart(tmp_path, seen)
+    asyncio.run(run_turn(store2, "u1", "s1", "q2"))
+    asyncio.run(run_turn(store2, "u1", "s1", "q3"))
+
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / "journal.jsonl").read_text(encoding="utf-8").strip().split("\n")
+    ]
+    assert len(lines) == 6  # 3 轮 × 2 行
+    assert [line["turn"] for line in lines] == [1, 1, 2, 2, 3, 3]
+    assert [line["role"] for line in lines] == ["user", "assistant"] * 3
+
+
+def test_same_session_concurrent_turns_persist_both(tmp_path) -> None:
+    """S6-4 (persistent version): the session lock keeps two concurrent turns
+    from clobbering each other's snapshot."""
+    repo = SessionRepository(tmp_path)
+    store = SessionStore(
+        agent_factory=lambda state=None: PersistingAgent(output=_cards_dict()),
+        repository=repo,
+    )
+
+    async def body() -> None:
+        await asyncio.gather(
+            run_turn(store, "u1", "s1", "第一个问题"),
+            run_turn(store, "u1", "s1", "第二个问题"),
+        )
+
+    asyncio.run(body())
+    restored = repo.load(("u1", "s1"))
+    assert restored is not None and len(restored.context) == 4
+    journal = (tmp_path / "journal.jsonl").read_text(encoding="utf-8").strip().split("\n")
+    assert len(journal) == 4

@@ -13,10 +13,11 @@ import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from agentscope.state import AgentState
 
-from harbor.features.chat.schemas import CommerceIntentResponse
+from harbor.features.chat.schemas import CommerceIntentResponse, SessionSummary
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,20 @@ class SnapshotWriteError(Exception):
 
     def __init__(self) -> None:
         super().__init__("failed to write session snapshot")
+
+
+class SnapshotLoadError(Exception):
+    """An existing snapshot cannot be restored (S6-3).
+
+    A missing file is not an error (first visit → fresh session). A file that
+    exists but is corrupt, future-versioned or structurally invalid is: treating
+    it as "no history" would silently clear the user's conversation.
+    """
+
+    def __init__(self, path: Path, reason: str) -> None:
+        self.path = path
+        self.reason = reason
+        super().__init__(f"cannot load session snapshot {path}: {reason}")
 
 
 class SessionRepository:
@@ -63,7 +78,8 @@ class SessionRepository:
                 "schema_version": SCHEMA_VERSION,
                 "buyer_id": key[0],
                 "shopping_session_id": key[1],
-                "updated_at": datetime.now(UTC).isoformat(),
+                "last_active_at": datetime.now(UTC).isoformat(),
+                "turn_count": self._turn_count(state),
                 "state": state.model_dump(mode="json"),
             }
             path = self.snapshot_path(key)
@@ -75,29 +91,71 @@ class SessionRepository:
             raise SnapshotWriteError() from exc
 
     def load(self, key: SessionKey) -> AgentState | None:
-        """Restore the session state, or ``None`` when absent/corrupt/unknown.
+        """Restore the session state, or ``None`` when the snapshot is absent.
 
-        A corrupt or future-versioned snapshot must not take the service down:
-        it is treated as "no history yet" (a fresh session) with a warning, never
-        an exception.
+        An existing but corrupt / future-versioned / invalid snapshot raises
+        ``SnapshotLoadError`` instead of returning ``None``: silently starting
+        from scratch would look to the user like their history vanished (S6-3).
+        The broken file is left in place for inspection.
         """
         path = self.snapshot_path(key)
         if not path.exists():
             return None
+        doc = self._read_envelope(path)
+        try:
+            return AgentState.model_validate(doc["state"])
+        except Exception as exc:
+            raise SnapshotLoadError(path, f"invalid state: {exc}") from exc
+
+    def list_sessions(self, buyer_id: str) -> list[SessionSummary]:
+        """The buyer's sessions, newest ``last_active_at`` first (S6-5).
+
+        Files that cannot be parsed at all have no recoverable ``buyer_id``, so
+        they are skipped with a warning rather than failing every buyer's list.
+        A parseable envelope for THIS buyer with missing/invalid fields does
+        raise ``SnapshotLoadError``: that session is visibly broken.
+        """
+        directory = self._root / "snapshots"
+        if not directory.exists():
+            return []
+        summaries: list[SessionSummary] = []
+        for path in sorted(directory.glob("*.json")):
+            try:
+                doc = self._read_envelope(path)
+            except SnapshotLoadError as exc:
+                logger.warning("skipping unreadable snapshot in session list: %s", exc)
+                continue
+            if doc.get("buyer_id") != buyer_id:
+                continue
+            try:
+                summaries.append(
+                    SessionSummary(
+                        shopping_session_id=doc["shopping_session_id"],
+                        last_active_at=doc["last_active_at"],
+                        turn_count=doc["turn_count"],
+                    )
+                )
+            except Exception as exc:
+                raise SnapshotLoadError(path, f"invalid envelope: {exc}") from exc
+        summaries.sort(key=lambda s: s.last_active_at, reverse=True)
+        return summaries
+
+    @staticmethod
+    def _turn_count(state: AgentState) -> int:
+        return sum(1 for msg in state.context if getattr(msg, "role", None) == "user")
+
+    def _read_envelope(self, path: Path) -> dict[str, Any]:
+        """Parse and version-check a snapshot envelope, raising on any defect."""
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
-            if doc.get("schema_version") != SCHEMA_VERSION:
-                logger.warning(
-                    "snapshot %r has schema_version %r, expected %d; ignoring",
-                    path,
-                    doc.get("schema_version"),
-                    SCHEMA_VERSION,
-                )
-                return None
-            return AgentState.model_validate(doc["state"])
-        except Exception as exc:  # noqa: BLE001 — corrupt data is a normal case
-            logger.warning("ignoring corrupt snapshot %r: %s", path, exc)
-            return None
+        except Exception as exc:
+            raise SnapshotLoadError(path, f"unreadable JSON: {exc}") from exc
+        if not isinstance(doc, dict):
+            raise SnapshotLoadError(path, "envelope is not a JSON object")
+        version = doc.get("schema_version")
+        if version != SCHEMA_VERSION:
+            raise SnapshotLoadError(path, f"schema_version {version!r} != {SCHEMA_VERSION}")
+        return doc
 
     def append_journal(
         self,

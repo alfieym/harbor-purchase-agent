@@ -1,10 +1,20 @@
-"""``POST /commerce/intents``: one conversational turn, one-shot JSON (S5)."""
+"""``POST /commerce/intents`` + ``GET /commerce/sessions`` (S5/S6)."""
+
+import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
 
 from harbor.core.config import Settings
-from harbor.features.chat.repository import SnapshotWriteError
-from harbor.features.chat.schemas import CommerceIntentRequest, CommerceIntentResponse
+from harbor.features.chat.repository import (
+    SessionRepository,
+    SnapshotLoadError,
+    SnapshotWriteError,
+)
+from harbor.features.chat.schemas import (
+    CommerceIntentRequest,
+    CommerceIntentResponse,
+    SessionListResponse,
+)
 from harbor.features.chat.service import (
     ModelFailureError,
     ModelTimeoutError,
@@ -41,5 +51,21 @@ async def intents(request: CommerceIntentRequest, http_request: Request) -> Comm
         raise HTTPException(status_code=502, detail="商品检索工具调用失败") from exc
     except NoStructuredOutputError as exc:
         raise HTTPException(status_code=502, detail=f"模型未产出结构化输出：{exc.text}") from exc
+    except SnapshotLoadError as exc:
+        # S6-3: never silently start from scratch on a broken snapshot.
+        raise HTTPException(status_code=500, detail="会话快照损坏") from exc
     except SnapshotWriteError as exc:
         raise HTTPException(status_code=500, detail="会话快照写入失败") from exc
+
+
+@router.get("/sessions", response_model=SessionListResponse)
+async def sessions(buyer_id: str, http_request: Request) -> SessionListResponse:
+    """List one buyer's sessions, newest ``last_active_at`` first (S6-5)."""
+    repo: SessionRepository | None = getattr(http_request.app.state, "session_repository", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="会话存储未配置")
+    try:
+        summaries = await asyncio.to_thread(repo.list_sessions, buyer_id)
+    except SnapshotLoadError as exc:
+        raise HTTPException(status_code=500, detail="会话快照损坏") from exc
+    return SessionListResponse(sessions=summaries)

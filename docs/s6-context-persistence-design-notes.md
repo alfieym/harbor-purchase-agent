@@ -243,3 +243,34 @@ app.state.chat_store = SessionStore(
 
 - 上下文增长控制 / 截断 / 摘要 / 早期消息卸载 → **S7**。
 - 快照压缩、后台异步写、多实例共享存储、`schema_version` 迁移逻辑 → 以后再说（字段先占位）。
+
+## 验收清单校准（2026-11-03）
+
+落地后收到 S6 验收清单，其中两条与本文档原取舍不同，以清单为准：
+
+1. **S6-3 反转为「显式报错」**。原文写的是「损坏 → `load` 返回 `None`，宁可从零开始也不崩溃」；
+   清单要求「手工改坏 → 报明确错误，不静默清空」。现改为：文件缺失仍返回 `None`（首访），
+   存在但 JSON 坏 / `schema_version` 不符 / `state` 结构非法 → 抛 `SnapshotLoadError`
+   → HTTP 500「会话快照损坏」，**坏文件原样保留**供排查。代价：该会话持续 500 直到人工修复，
+   其它会话不受影响。
+2. **S6-5 新增会话列表**（原设计没有）。`GET /commerce/sessions?buyer_id=…` 返回
+   `{"sessions":[{shopping_session_id, last_active_at, turn_count}]}`，按 `last_active_at` 倒序。
+   快照信封的 `updated_at` 更名为 `last_active_at`，并新增 `turn_count`（保存时从
+   `state.context` 数 `role=="user"`，不另存计数器）。
+
+## 真实运行校准（2026-11-03）
+
+真模型 1+1 冒烟（`scripts/s6_smoke.py`）修正了一处对 AgentScope 的假设：
+
+- **`structured_output` 不在消息上**。真实 ReAct 回合结束后，`state.context` 里只有
+  hint / tool_call / tool_result 轨迹，消息自身的 `structured_output` 字段为 `None`。
+  解析结果落在 `state.reply_context.structured_output`；同一批卡片也作为
+  `GenerateStructuredOutput` 的 tool_call 入参留在轨迹里。
+- 恢复仍然完整：`AgentState.model_dump/validate` 把 `reply_context` 一并 round-trip；
+  且 AgentScope 在每轮 `reply` 开头整体重建 `reply_context`（`_agent.py:1112`），
+  所以恢复出来的上轮 `structured_output` 不会污染下一轮。
+- 结论：S6-6 成立，但证据位置应为「`reply_context.structured_output` +
+  轨迹里的 `GenerateStructuredOutput`」，而不是单元测试桩里的 `msg.structured_output`。
+- 冒烟配置：`HARBOR_SEARCH_RERANK_ENABLED=false`（本地 reranker 模型未缓存，与 S6 无关）；
+  索引指纹命中，重启未重嵌商品。
+

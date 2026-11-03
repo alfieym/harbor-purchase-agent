@@ -1,6 +1,7 @@
 """S5: POST /commerce/intents routing + error envelope (offline, stub agent)."""
 
 import asyncio
+import json
 
 from agentscope.message import ToolResultState
 from fastapi import FastAPI
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from harbor.core.config import Settings
 from harbor.core.errors import install_error_handlers
-from harbor.features.chat.repository import SnapshotWriteError
+from harbor.features.chat.repository import SessionRepository, SnapshotWriteError
 from harbor.features.chat.router import router
 from harbor.features.chat.service import SessionStore
 
@@ -89,11 +90,16 @@ def _cards_dict() -> dict:
     }
 
 
-def _client(store: SessionStore | None, timeout_seconds: float = 120.0) -> TestClient:
+def _client(
+    store: SessionStore | None,
+    timeout_seconds: float = 120.0,
+    session_repository=None,
+) -> TestClient:
     app = FastAPI()
     install_error_handlers(app)
     app.include_router(router, prefix="/commerce")
     app.state.chat_store = store
+    app.state.session_repository = session_repository
     app.state.settings = Settings(_env_file=None, turn_timeout_seconds=timeout_seconds)
     return TestClient(app)
 
@@ -223,3 +229,71 @@ def test_intents_snapshot_failure_returns_500() -> None:
 
     assert resp.status_code == 500
     assert resp.json()["error"]["code"] == "http_500"
+
+
+def test_intents_corrupt_snapshot_returns_500(tmp_path) -> None:
+    """S6-3: a hand-broken snapshot must surface as an explicit error, not a
+    silent fresh session."""
+    repo = SessionRepository(tmp_path)
+    path = repo.snapshot_path(("u1", "s1"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not valid json", encoding="utf-8")
+    store = SessionStore(
+        agent_factory=lambda state=None: FakeAgent(output=_cards_dict()),
+        repository=repo,
+    )
+    with _client(store, session_repository=repo) as client:
+        resp = client.post(
+            "/commerce/intents",
+            json={"buyer_id": "u1", "shopping_session_id": "s1", "raw_query": "hi"},
+        )
+
+    assert resp.status_code == 500
+    assert resp.json()["error"]["message"] == "会话快照损坏"
+    assert path.exists()  # 坏文件保留，供人工排查
+
+
+def _envelope(buyer: str, session: str, at: str, turns: int) -> dict:
+    return {
+        "schema_version": 1,
+        "buyer_id": buyer,
+        "shopping_session_id": session,
+        "last_active_at": at,
+        "turn_count": turns,
+        "state": {},
+    }
+
+
+def _write_snapshot(repo: SessionRepository, key, doc: dict) -> None:
+    path = repo.snapshot_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_sessions_lists_buyer_sessions_newest_first(tmp_path) -> None:
+    """S6-5: GET /commerce/sessions?buyer_id= lists only that buyer, desc."""
+    repo = SessionRepository(tmp_path)
+    _write_snapshot(repo, ("u1", "old"), _envelope("u1", "old", "2026-11-01T10:00:00+00:00", 1))
+    _write_snapshot(repo, ("u1", "new"), _envelope("u1", "new", "2026-11-03T10:00:00+00:00", 3))
+    _write_snapshot(repo, ("u2", "other"), _envelope("u2", "other", "2026-11-04T10:00:00+00:00", 9))
+
+    with _client(None, session_repository=repo) as client:
+        resp = client.get("/commerce/sessions", params={"buyer_id": "u1"})
+
+    assert resp.status_code == 200
+    sessions = resp.json()["sessions"]
+    assert [s["shopping_session_id"] for s in sessions] == ["new", "old"]
+    assert sessions[0]["turn_count"] == 3
+
+
+def test_sessions_requires_buyer_id(tmp_path) -> None:
+    repo = SessionRepository(tmp_path)
+    with _client(None, session_repository=repo) as client:
+        resp = client.get("/commerce/sessions")
+    assert resp.status_code == 422
+
+
+def test_sessions_unconfigured_returns_503() -> None:
+    with _client(None, session_repository=None) as client:
+        resp = client.get("/commerce/sessions", params={"buyer_id": "u1"})
+    assert resp.status_code == 503

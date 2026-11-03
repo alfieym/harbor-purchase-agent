@@ -1,0 +1,565 @@
+<title>S6 上下文持久化 · 请求 → 读快照 → 回答 → 写快照 → 写流水</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --seq: #0E7A6B; --warn: #9A6700; --warn-soft: #FBF3DF; --soft: #3353A6; --soft-soft: #EAF0FB;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --seq: #2BBBA4; --warn: #E0A63C; --warn-soft: #2E2617; --soft: #8FB0E8; --soft-soft: #182238;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --seq: #2BBBA4; --warn: #E0A63C; --warn-soft: #2E2617; --soft: #8FB0E8; --soft-soft: #182238;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(48px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; }
+  header { margin-bottom: 20px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 82ch; }
+  .sub b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.query { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+  .chip.soft { border-color: var(--soft); color: var(--soft); }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 14px 16px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .flow-break { flex-basis: 100%; height: 2px; }
+  .flow-step { display: flex; flex-direction: column; align-items: center; min-width: 76px; padding: 2px 8px; }
+  .fidx { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); }
+  .fname { font-size: 14px; font-weight: 600; }
+  .fcount { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .flow-link { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--faint); }
+  .farrow { font-size: 18px; line-height: 1; }
+  .fwhat { font-size: 11px; color: var(--muted); font-family: "IBM Plex Mono", monospace; max-width: 130px; text-align: center; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+
+  .mhead { margin: 36px 0 4px; font-size: 19px; font-weight: 700; }
+  .msub { color: var(--muted); font-size: 13px; margin: 0 0 14px; max-width: 82ch; }
+  .msub b { color: var(--fg); }
+
+  /* --- 两份产物 --- */
+  .pairgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 820px) { .pairgrid { grid-template-columns: 1fr; } }
+  .pcard { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .pcard.primary { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+  .pcard h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px dashed; letter-spacing: .03em; }
+  .badge.src { color: var(--accent-ink); border-color: var(--accent); }
+  .badge.eval { color: var(--soft); border-color: var(--soft); background: var(--soft-soft); }
+  .badge.hard { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .badge.soft { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .pcard p { margin: 0; font-size: 13px; color: var(--muted); }
+  .pcard p b { color: var(--fg); }
+  .krow { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; }
+  .krow .k { font-family: "IBM Plex Mono", monospace; color: var(--faint); white-space: nowrap; }
+  .krow .v { font-family: "IBM Plex Mono", monospace; text-align: right; }
+
+  /* --- 快照层 --- */
+  .layers { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .layer { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; cursor: pointer; transition: opacity .12s ease, box-shadow .12s ease; }
+  .layer:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .layer h4 { margin: 0 0 4px; font-size: 13px; font-family: "IBM Plex Mono", monospace; font-weight: 500; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .layer .job { font-size: 11px; color: var(--faint); font-family: "IBM Plex Mono", monospace; }
+  .layer p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .layer.hot { box-shadow: 0 0 0 2px var(--accent); }
+  body.inking .layer { opacity: .42; }
+  body.inking .layer.hot { opacity: 1; }
+  .layer.core { border-color: var(--accent); }
+  .layer.core h4 { color: var(--accent-ink); }
+
+  /* --- 代码 --- */
+  .code { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+  .code .ln { display: grid; grid-template-columns: 46px 1fr; gap: 10px; padding: 2px 12px; white-space: pre; }
+  .code .no { color: var(--faint); text-align: right; user-select: none; }
+  .code .c { color: var(--muted); }
+  .code .kw { color: var(--accent-ink); }
+  .code .st { color: var(--good); }
+
+  /* --- 重放 --- */
+  .replaybar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .btn { font-family: "IBM Plex Sans", sans-serif; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn.ghost { background: var(--surface); color: var(--accent-ink); border-color: var(--border); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .stepno { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); margin-left: auto; }
+  .narration { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; margin-bottom: 12px; min-height: 46px; }
+  .narration b { color: var(--accent-ink); }
+  .lanes { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .lanes { grid-template-columns: 1fr; } }
+  .lane { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; min-height: 220px; }
+  .lane-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .lane-name { font-weight: 600; font-size: 14px; }
+  .lane-sub { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); }
+  .lane-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+  .lane-body .empty { color: var(--faint); font-family: "IBM Plex Mono", monospace; }
+  .jline { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; padding: 5px 8px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .jline.u { border-left: 3px solid var(--soft); }
+  .jline.a { border-left: 3px solid var(--good); }
+  .jline.new { box-shadow: 0 0 0 2px var(--accent); }
+  .snapbox { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; white-space: pre; overflow-x: auto; }
+  .snapbox .k { color: var(--muted); }
+  .snapbox .v { color: var(--accent-ink); }
+  .memrow { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border); font-family: "IBM Plex Mono", monospace; font-size: 11.5px; }
+  .memrow .ok { color: var(--good); }
+  .memrow .miss { color: var(--bad); }
+
+  /* --- 文件树 --- */
+  .tree { font-family: "IBM Plex Mono", monospace; font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; white-space: pre; overflow-x: auto; line-height: 1.75; }
+  .tree .d { color: var(--accent-ink); font-weight: 500; }
+  .tree .f { color: var(--fg); }
+  .tree .cm { color: var(--faint); }
+
+  /* --- 失败语义表 --- */
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .trow { display: grid; grid-template-columns: 1.25fr 1.15fr 70px 1.2fr; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .trow:last-child { border-bottom: 0; }
+  .trow.head { background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .trow .sc { font-size: 13px; }
+  .trow .bh { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); }
+  .tstat { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; text-align: center; white-space: nowrap; }
+  .tstat.ok { color: var(--good); background: var(--good-soft); }
+  .tstat.warn { color: var(--warn); background: var(--warn-soft); }
+  .tstat.bad { color: var(--bad); background: var(--bad-soft); }
+  .tstat.pass { color: var(--good); background: var(--good-soft); }
+  .tstat.info { color: var(--accent-ink); background: var(--surface-2); }
+  .tid { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); font-weight: 500; white-space: nowrap; }
+  #acceptance .trow { grid-template-columns: 64px 1.4fr 1.2fr 60px; }
+
+  /* --- 逐出说明 --- */
+  .evict { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px,1fr)); gap: 10px; }
+  .ev { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; }
+  .ev .n { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--bad); }
+  .ev h4 { margin: 2px 0 6px; font-size: 14px; }
+  .ev p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .ev p b { color: var(--fg); }
+
+  /* --- 三道闸 --- */
+  .guards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px,1fr)); gap: 10px; }
+  .guard { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; display: flex; flex-direction: column; gap: 7px; }
+  .guard h4 { margin: 0; font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .guard .gno { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); }
+  .guard p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .guard code { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; color: var(--fg); }
+
+  /* --- 竞态时间线 --- */
+  .race { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-top: 12px; }
+  .race .rline { display: grid; grid-template-columns: 44px 1fr; gap: 10px; font-size: 12.5px; padding: 4px 0; }
+  .race .rt { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--faint); }
+  .race .bad2 { color: var(--bad); }
+  .race .good2 { color: var(--good); }
+
+  .note { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { gap: 2px; padding: 12px 8px; }
+    .flow-step { min-width: 0; padding: 2px 4px; }
+    .farrow { font-size: 15px; }
+    .trow { grid-template-columns: 1fr; gap: 4px; padding: 10px 12px; }
+    .trow.head { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .layer { transition: none; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Purchase Agent · S6</p>
+    <h1>模型上下文的持久化层</h1>
+    <p class="sub">S5 的会话只活在进程内存里，重启即归零。S6 把「模型上下文」落成两份产物：<b>快照</b>是恢复的唯一真相源，<b>流水</b>只服务复盘与评测。主流程一句话——<b>请求 → 读快照 → 创建或恢复 Agent → 回答 → 写快照 → 写流水</b>。S6 忠实存全量历史，增长与截断留给 S7。</p>
+    <div class="chips">
+      <span class="chip query">schema_version = 1</span>
+      <span class="chip">snapshot = AgentState 全量 JSON</span>
+      <span class="chip">journal = 一问一答两行</span>
+      <span class="chip soft">原子写：.tmp + os.replace</span>
+      <span class="chip soft">key = sha256(buyer \0 session)</span>
+      <span class="chip good">192 tests passed</span>
+      <span class="chip good">六条验收 PASS</span>
+    </div>
+
+    <div class="flow" aria-label="S6 主流程">
+      <div class="flow-step"><span class="fidx">①</span><span class="fname">请求</span><span class="fcount">buyer · session · query</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">get_or_create</span></div>
+      <div class="flow-step"><span class="fidx">②</span><span class="fname">读快照</span><span class="fcount">内存 → 磁盘</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">model_validate</span></div>
+      <div class="flow-step"><span class="fidx">③</span><span class="fname">恢复 / 新建</span><span class="fcount">Agent(state=…)</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">持锁 reply</span></div>
+      <div class="flow-step"><span class="fidx">④</span><span class="fname">回答</span><span class="fcount">工具 + 结构化</span></div>
+      <div class="flow-break"></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">成功才写</span></div>
+      <div class="flow-step"><span class="fidx">⑤</span><span class="fname">写快照</span><span class="fcount">原子覆盖</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">追加两行</span></div>
+      <div class="flow-step"><span class="fidx">⑥</span><span class="fname">写流水</span><span class="fcount">question + answer</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">返回</span></div>
+      <div class="flow-step"><span class="fidx">⑦</span><span class="fname">响应</span><span class="fcount">final_text + cards</span></div>
+    </div>
+    <p class="hint">下面依次拆：两份产物 → 快照装了什么 → 恢复为什么只要一行 → 一次真实的重启重放 → 失败语义 → 并发三道闸。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2 class="mhead">两份产物，职责完全不同</h2>
+  <p class="msub">最容易搞混的是「流水也是历史，为什么不拿它恢复？」——因为流水是<b>面向人</b>的问答记录（缺工具调用、缺中间状态），而快照是<b>面向 Agent</b> 的完整状态。恢复只读快照。</p>
+  <div class="pairgrid">
+    <section class="pcard primary">
+      <h3>快照 <span class="badge src">恢复的真相源</span></h3>
+      <div class="krow"><span class="k">文件</span><span class="v">snapshots/{sha256}.json</span></div>
+      <div class="krow"><span class="k">内容</span><span class="v">AgentState 全量</span></div>
+      <div class="krow"><span class="k">写入</span><span class="v">成功轮 · 原子覆盖</span></div>
+      <div class="krow"><span class="k">失败</span><span class="v">硬错误 → 500</span></div>
+      <p>消息数组、工具调用、中间上下文、待确认状态，一样不少。恢复时 <b>model_validate</b> 回 <span class="mono">AgentState</span> 直接喂给 Agent。</p>
+    </section>
+    <section class="pcard">
+      <h3>流水 <span class="badge eval">复盘 / 评测</span></h3>
+      <div class="krow"><span class="k">文件</span><span class="v">journal.jsonl（全局一份）</span></div>
+      <div class="krow"><span class="k">内容</span><span class="v">每轮恰好两行</span></div>
+      <div class="krow"><span class="k">写入</span><span class="v">一次 write 追加</span></div>
+      <div class="krow"><span class="k">失败</span><span class="v">软错误 → warning + 200</span></div>
+      <p>只记「问了什么、答了什么、第几轮、卡片明细」。评测按时间遍历全部会话；复盘某会话 <span class="mono">grep shopping_session_id</span> 即可。<b>永远不参与恢复。</b></p>
+    </section>
+  </div>
+
+  <h2 class="mhead">快照里到底装了什么</h2>
+  <p class="msub">不是我们手挑的字段——<span class="mono">AgentState</span> 是 AgentScope 自己声明「该保存和加载」的完整状态，我们原样序列化。悬停/聚焦任一层看它承担什么。</p>
+  <div class="layers" id="layers"></div>
+
+  <h2 class="mhead">恢复的代码路径：一行把状态交还给 Agent</h2>
+  <p class="msub">因为 AgentScope 的 <span class="mono">Agent.__init__</span> 就是 <span class="mono">self.state = state or AgentState()</span>，而 <span class="mono">reply</span> 全程读 <span class="mono">self.state.context</span>——没有额外的 memory 需要重建。恢复 = 反序列化 + 传进去 + 重新放行工具。</p>
+  <div class="code" id="restore"></div>
+
+  <h2 class="mhead">一次对话，一次重启（可交互重放）</h2>
+  <p class="msub">点「下一步」逐步走过：首轮落盘 → 进程重启、内存清空 → 第二轮从磁盘恢复并继续。注意磁盘三样东西在两轮之间的变化。</p>
+  <div class="replaybar">
+    <button class="btn" id="next">下一步 →</button>
+    <button class="btn ghost" id="reset">重置</button>
+    <span class="stepno" id="stepno"></span>
+  </div>
+  <div class="narration" id="narration"></div>
+  <div class="lanes">
+    <section class="lane">
+      <div class="lane-head"><span class="lane-name">内存 SessionStore</span><span class="lane-sub">进程内 dict</span></div>
+      <div class="lane-body" id="lane-mem"></div>
+    </section>
+    <section class="lane">
+      <div class="lane-head"><span class="lane-name">磁盘快照</span><span class="lane-sub">snapshots/*.json</span></div>
+      <div class="lane-body" id="lane-disk"></div>
+    </section>
+    <section class="lane">
+      <div class="lane-head"><span class="lane-name">流水 journal</span><span class="lane-sub">journal.jsonl</span></div>
+      <div class="lane-body" id="lane-journal"></div>
+    </section>
+  </div>
+
+  <h2 class="mhead">存储布局</h2>
+  <p class="msub">每个会话一个快照文件（只读自己的）；流水全局一份（评测要跨会话按时间遍历）。目录整体 git-ignore——运行时状态可能含 PII。</p>
+  <div class="tree" id="tree"></div>
+
+  <h2 class="mhead">会话列表：按最近活跃倒序</h2>
+  <p class="msub">列表只读每个快照的<b>信封</b>（不反序列化整份 AgentState），按 <span class="mono">last_active_at</span> 倒序。`buyer_id` 必填，保证多租户隔离；每项只给定位所需的三个字段。</p>
+  <div class="pairgrid">
+    <section class="pcard primary">
+      <h3>请求 <span class="badge src">GET</span></h3>
+      <div class="krow"><span class="k">路径</span><span class="v">/commerce/sessions</span></div>
+      <div class="krow"><span class="k">参数</span><span class="v">buyer_id（必填）</span></div>
+      <div class="krow"><span class="k">排序</span><span class="v">last_active_at ↓</span></div>
+      <p>缺失 <span class="mono">buyer_id</span> → 422；存储未装配 → 503；某个快照属于该买家却字段非法 → 500。</p>
+    </section>
+    <section class="pcard">
+      <h3>响应 <span class="badge eval">200</span></h3>
+      <div class="code" id="listcode"></div>
+      <p>只列该买家的会话。完全无法解析的文件连 <span class="mono">buyer_id</span> 都读不出，跳过并告警，不拖垮所有人的列表。</p>
+    </section>
+  </div>
+
+  <h2 class="mhead">失败语义：什么会挡请求，什么只留痕</h2>
+  <p class="msub">判断标准只有一条：<b>用户会不会以为「已经存好了」</b>。快照是承诺，失败必须 500；流水是旁路，失败只告警。任何失败轮都不落盘。</p>
+  <div class="tbl" id="failures"></div>
+
+  <h2 class="mhead">失败即逐出：为什么异常路径还要 evict</h2>
+  <p class="msub">只「不写快照」还不够。失败那轮里，AgentScope 可能已经在 <span class="mono">agent.state.context</span> 留下半截消息；而同一个 Session 还缓存在内存里。逐出把这两个隐患一起消掉。</p>
+  <div class="evict">
+    <div class="ev"><span class="n">隐患 1</span><h4>残渣被下一轮写进快照</h4><p>失败轮留下的半个 user msg / 半个工具调用，会在<b>下一次成功</b>时随整份 context 一起落盘，把「失败轮回滚」悄悄破坏掉。</p></div>
+    <div class="ev"><span class="n">隐患 2</span><h4>重试把同一句写两遍</h4><p>快照写失败后若保留 Session，客户端重试会命中同一个 Agent，同一个 user msg 被追加第二次——把用户被告知「丢了」的那轮又写了回去。</p></div>
+    <div class="ev"><span class="n">结果</span><h4>下次访问 = 最后一轮成功</h4><p>逐出后，下一次 <span class="mono">get_or_create</span> 从盘上<b>最后一轮成功</b>的快照重建，内存与磁盘在失败后重新一致。</p></div>
+  </div>
+
+  <h2 class="mhead">并发正确性：三道闸</h2>
+  <p class="msub">「每会话一把锁 → 不会同时写同一快照」这句话，需要三道闸才真的成立。第三道是代码评审揪出来的缺口，已补。</p>
+  <div class="guards" id="guards"></div>
+  <div class="race">
+    <div class="rline"><span class="rt">t0</span><span>请求 <b>A</b> 进入，拿到会话锁开始 reply。</span></div>
+    <div class="rline"><span class="rt">t1</span><span>请求 <b>B</b> 同 key 到达，取到<b>同一个 Session</b>，阻塞在锁上。</span></div>
+    <div class="rline"><span class="rt">t2</span><span>A 工具失败 → <span class="mono">evict(key)</span> → 重抛。锁释放。</span></div>
+    <div class="rline"><span class="rt">t3</span><span>B 拿到锁，但手里的 Session 已被逐出，context 里还有 A 的半截消息。</span></div>
+    <div class="rline"><span class="rt">修复前</span><span class="bad2">B 在残渣上继续 → persist 把 A 的残渣写进快照 ✗</span></div>
+    <div class="rline"><span class="rt">修复后</span><span class="good2">锁内复核 <span class="mono">is_cached(key, session)</span> 为 False → 回到 get_or_create，从最后一轮成功快照重建 ✓</span></div>
+  </div>
+
+  <h2 class="mhead">S6 验证</h2>
+  <p class="msub">全部离线：快照/流水用 <span class="mono">tmp_path</span> 隔离，Agent 用桩，不碰网络与真实 embedding。</p>
+  <div class="tbl" id="tests"></div>
+
+  <h2 class="mhead">六条验收</h2>
+  <p class="msub">对应 <span class="mono">docs/_build_log/2026-11-03-s6-acceptance-report.md</span>。S6-3 与 S6-5 是清单落地后对原设计的校准（损坏改为显式报错；新增会话列表）。</p>
+  <div class="tbl" id="acceptance"></div>
+
+  <div class="note">
+    <b>显式不在 S6：</b>上下文增长控制、截断、摘要、早期消息卸载都属于 <b>S7 上下文治理</b>。快照压缩、后台异步写、多实例共享存储、<span class="mono">schema_version</span> 迁移也留到以后——字段先占位，格式演进有钩子。
+  </div>
+</main>
+
+<script>
+  // ---------- 快照层 ----------
+  const LAYERS = [
+    { name: "context", core: true, job: "恢复主体",
+      text: "消息数组 + 工具调用。user / assistant 消息、tool_use 与 tool_result 块全在这里；「继续上一轮」靠的就是它。" },
+    { name: "middle_context", job: "中间上下文",
+      text: "AgentScope 在 ReAct 循环里产生的中间产物。不恢复它，模型会像失忆一样重跑推理。" },
+    { name: "reply_context", job: "本轮回复状态",
+      text: "回复在途时的状态（当前轮次的上下文），随快照一起落盘，恢复后行为与进程内连续对话一致。" },
+    { name: "permission_context", job: "权限引擎",
+      text: "工具放行的记录。恢复后仍要重新走 allow_product_search_tool，保证放行在重建的 engine 上生效。" },
+    { name: "tool_context", job: "工具上下文",
+      text: "工具调用的共享上下文，跨轮工具状态不断档。" },
+    { name: "tasks_context", job: "任务 / 计划",
+      text: "AgentScope 的任务规划状态，恢复后未完成的任务仍然在。" },
+    { name: "summary", job: "摘要（S7 主战场）",
+      text: "S6 原样存；真正的摘要与增长治理留到 S7。" },
+  ];
+  const layerEls = [];
+  document.getElementById("layers").innerHTML = LAYERS.map((l, i) =>
+    `<div class="layer${l.core ? " core" : ""}" data-i="${i}" tabindex="0">` +
+    `<h4><span>${l.name}</span><span class="job">${l.job}</span></h4>` +
+    `<p>${l.text}</p></div>`).join("");
+  document.querySelectorAll(".layer").forEach(el => {
+    const on = () => { document.body.classList.add("inking"); el.classList.add("hot"); };
+    const off = () => { document.body.classList.remove("inking"); el.classList.remove("hot"); };
+    el.addEventListener("mouseenter", on); el.addEventListener("mouseleave", off);
+    el.addEventListener("focus", on); el.addEventListener("blur", off);
+  });
+
+  // ---------- 恢复代码 ----------
+  const CODE = [
+    "# repository.py — 读快照",
+    "return AgentState.model_validate(doc[\"state\"])",
+    "",
+    "# service.py — 内存未命中时从磁盘恢复",
+    "state = await asyncio.to_thread(self._repository.load, key)",
+    "session = Session(agent=self._agent_factory(state), ...)",
+    "",
+    "# factory.py — 状态直接交给 Agent",
+    "agent = Agent(..., state=state, ...)   # self.state = state or AgentState()",
+    "allow_product_search_tool(agent)       # 恢复后也要重新放行工具",
+  ];
+  document.getElementById("restore").innerHTML = CODE.map((txt, i) =>
+    `<div class="ln"><span class="no">${i + 1}</span><span>${
+      txt.startsWith("#") ? `<span class="c">${txt}</span>` : txt
+    }</span></div>`).join("");
+
+  // ---------- 重放 ----------
+  function snap(msgs, turn, time) {
+    return { msgs, turn, time };
+  }
+
+  const STEPS = [
+    { title: "进程启动", note: "SessionStore 是进程内 dict，空。磁盘上还没有任何会话文件。",
+      mem: [], disk: null, journal: [] },
+
+    { title: "第 1 轮 · 请求到达", note: "<b>get_or_create</b>：内存未命中 → 读快照 → 文件不存在，load 返回 None → 用全新 AgentState 建 Agent。",
+      mem: [{ key: "(\"u1\",\"s1\")", msgs: 0, status: "新建 Agent" }], disk: null, journal: [] },
+
+    { title: "第 1 轮 · 回答完成", note: "持锁 <b>reply</b>：模型调工具、产出结构化商品卡。这时 context 里已有 user + assistant 两条消息，但还只在内存里。",
+      mem: [{ key: "(\"u1\",\"s1\")", msgs: 2, status: "context = 2" }], disk: null, journal: [] },
+
+    { title: "第 1 轮 · 写快照", note: "<b>repo.save</b>：AgentState.model_dump(mode=\"json\") → 写 .json.tmp → os.replace 原子覆盖。turn = context 里 role==\"user\" 的条数 = 1。",
+      mem: [{ key: "(\"u1\",\"s1\")", msgs: 2, status: "context = 2" }],
+      disk: snap(2, 1, "12:00:00"), journal: [] },
+
+    { title: "第 1 轮 · 写流水", note: "<b>repo.append_journal</b>：一问一答两行，一次 write 追加，避免被其它会话的并发追加拆开。流水失败只 warning，不影响这次 200。",
+      mem: [{ key: "(\"u1\",\"s1\")", msgs: 2, status: "context = 2" }],
+      disk: snap(2, 1, "12:00:00"), journal: [{ role: "user", turn: 1, text: "给猫买个饮水器" }, { role: "assistant", turn: 1, text: "命中 1 条 · cards[1]" }] },
+
+    { title: "进程重启", note: "内存全丢——这正是 S5 的断点。磁盘上的快照与流水完好无损。",
+      mem: [], disk: snap(2, 1, "12:00:00"), journal: [{ role: "user", turn: 1, text: "给猫买个饮水器" }, { role: "assistant", turn: 1, text: "命中 1 条 · cards[1]" }] },
+
+    { title: "第 2 轮 · 读快照恢复", note: "<b>内存未命中 → repo.load 命中</b> → AgentState.model_validate → build_agent(state=…)。消息、工具调用、中间状态一起回来了。",
+      mem: [{ key: "(\"u1\",\"s1\")", msgs: 2, status: "从快照恢复" }],
+      disk: snap(2, 1, "12:00:00"), journal: [{ role: "user", turn: 1, text: "给猫买个饮水器" }, { role: "assistant", turn: 1, text: "命中 1 条 · cards[1]" }] },
+
+    { title: "第 2 轮 · 回答并写快照", note: "新消息追加到恢复出的 context（2 → 4 条），然后整份覆盖快照。turn 由状态推导 = 2，不需要单独的计数器。",
+      mem: [{ key: "(\"u1\",\"s1\")", msgs: 4, status: "context = 4" }],
+      disk: snap(4, 2, "12:05:00"), journal: [{ role: "user", turn: 1, text: "给猫买个饮水器" }, { role: "assistant", turn: 1, text: "命中 1 条 · cards[1]" }] },
+
+    { title: "第 2 轮 · 写流水", note: "再追加两行。至此这个会话在流水里是连续的 4 行，可整段拉出来复盘。",
+      mem: [{ key: "(\"u1\",\"s1\")", msgs: 4, status: "context = 4" }],
+      disk: snap(4, 2, "12:05:00"),
+      journal: [
+        { role: "user", turn: 1, text: "给猫买个饮水器" },
+        { role: "assistant", turn: 1, text: "命中 1 条 · cards[1]" },
+        { role: "user", turn: 2, text: "再推荐一个" },
+        { role: "assistant", turn: 2, text: "命中 1 条 · cards[1]" },
+      ] },
+  ];
+
+  let step = 0;
+  const $ = id => document.getElementById(id);
+
+  function render() {
+    const s = STEPS[step];
+    $("stepno").textContent = `step ${step} / ${STEPS.length - 1}`;
+    $("narration").innerHTML = `<b>${esc(s.title)}</b> — ${s.note}`;
+    $("next").disabled = step >= STEPS.length - 1;
+
+    // 内存
+    $("lane-mem").innerHTML = s.mem.length === 0
+      ? `<span class="empty">（空）</span>`
+      : s.mem.map(m =>
+        `<div class="memrow"><span>${esc(m.key)}</span><span class="ok">${esc(m.status)}</span></div>` +
+        `<div class="memrow" style="border:0;background:transparent"><span style="color:var(--faint)">context</span><span>${m.msgs} 条消息</span></div>`
+      ).join("");
+
+    // 快照
+    if (!s.disk) {
+      $("lane-disk").innerHTML = `<span class="empty">（无快照文件）</span>`;
+    } else {
+      $("lane-disk").innerHTML =
+        `<div class="snapbox"><span class="k">"schema_version"</span>: <span class="v">1</span>` +
+        `\n<span class="k">"buyer_id"</span>: <span class="v">"u1"</span>` +
+        `\n<span class="k">"shopping_session_id"</span>: <span class="v">"s1"</span>` +
+        `\n<span class="k">"last_active_at"</span>: <span class="v">"…T${s.disk.time}Z"</span>` +
+        `\n<span class="k">"turn_count"</span>: <span class="v">${s.disk.turn}</span>` +
+        `\n<span class="k">"state"</span>: { <span class="k">context</span>: <span class="v">[${s.disk.msgs} msgs]</span>, … }</div>` +
+        `<div class="jline">turn = ${s.disk.turn} · 恢复入口：model_validate(doc["state"])</div>`;
+    }
+
+    // 流水
+    $("lane-journal").innerHTML = s.journal.length === 0
+      ? `<span class="empty">（空文件）</span>`
+      : s.journal.map(l =>
+        `<div class="jline ${l.role === "user" ? "u" : "a"}">` +
+        `{"role":"${l.role}","turn":${l.turn},"text":"${esc(l.text)}"}</div>`).join("");
+  }
+
+  function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  $("next").addEventListener("click", () => { if (step < STEPS.length - 1) { step++; render(); } });
+  $("reset").addEventListener("click", () => { step = 0; render(); });
+  render();
+
+  // ---------- 文件树 ----------
+  $("tree").innerHTML =
+`<span class="d">data/sessions/</span>                    <span class="cm"># git-ignored（运行时状态，可能含 PII）</span>
+├── <span class="d">snapshots/</span>                 <span class="cm"># 每会话一个快照，恢复只读自己</span>
+│   └── <span class="f">{sha256(buyer \\0 session)}.json</span>
+└── <span class="f">journal.jsonl</span>              <span class="cm"># 全局一份，一问一答两行</span>
+
+<span class="cm"># 为什么文件名是哈希：会话 id 是任意字符串，可能含「/」或「..」，</span>
+<span class="cm"># 直接当文件名会逃出目录。sha256 保证文件系统安全，且稳定可重算。</span>`;
+
+  $("listcode").innerHTML = [
+    "GET /commerce/sessions?buyer_id=u1",
+    "",
+    "{",
+    '  "sessions": [',
+    '    {"shopping_session_id": "s2",',
+    '     "last_active_at": "2026-11-03T12:05:00+00:00",',
+    '     "turn_count": 2},',
+    '    {"shopping_session_id": "s1",',
+    '     "last_active_at": "2026-11-02T09:31:00+00:00",',
+    '     "turn_count": 1}',
+    "  ]",
+    "}",
+  ].map((t, i) =>
+    `<div class="ln"><span class="no">${i + 1}</span><span>${esc(t)}</span></div>`).join("");
+
+  // ---------- 失败语义 ----------
+  const FAILURES = [
+    ["快照文件不存在", "load → None", "200", "首访：新建会话", "ok"],
+    ["快照损坏 / 版本不符 / 结构非法", "SnapshotLoadError", "500", "报错并保留坏文件", "bad"],
+    ["快照写失败", "SnapshotWriteError + 记根因日志", "500", "本轮不落盘，会话逐出", "bad"],
+    ["流水写失败", "logger.warning", "200", "快照已更新，流水缺行", "warn"],
+    ["超时", "ModelTimeoutError", "504", "本轮不落盘，会话逐出", "bad"],
+    ["工具有 ERROR 结果", "ToolFailureError", "502", "本轮不落盘，会话逐出", "bad"],
+    ["模型调用异常", "ModelFailureError", "502", "本轮不落盘，会话逐出", "bad"],
+    ["无结构化输出", "NoStructuredOutputError", "502", "本轮不落盘，会话逐出", "bad"],
+  ];
+  $("failures").innerHTML =
+    `<div class="trow head"><span>场景</span><span>代码行为</span><span>HTTP</span><span>持久化结果</span></div>` +
+    FAILURES.map(([a, b, c, d, k]) =>
+      `<div class="trow"><span class="sc">${a}</span><span class="bh">${b}</span>` +
+      `<span class="tstat ${k}">${c}</span><span class="bh">${d}</span></div>`).join("");
+
+  // ---------- 三道闸 ----------
+  const GUARDS = [
+    ["01", "每会话一把锁", "同 key 请求串行", "Agent.reply 不可重入；run_turn 全程持 session.lock，快照写入天然串行。"],
+    ["02", "LRU 跳过在飞会话", "_evict_lru 看 lock.locked()", "正在 reply 的会话 last_active 是陈旧的，不跳过的话会被别的 key 触发逐出，同一 key 出现两个 Agent 并发写快照。"],
+    ["03", "拿到锁后复核身份", "is_cached(key, session)", "等待锁期间会话可能被并发的失败请求逐出；复核失败就回到 get_or_create，从最后一轮成功快照重建。"],
+  ];
+  $("guards").innerHTML = GUARDS.map(([n, h, c, p]) =>
+    `<div class="guard"><h4><span class="gno">${n}</span>${h}</h4>` +
+    `<p><code>${c}</code></p><p>${p}</p></div>`).join("");
+
+  // ---------- 测试表 ----------
+  const TESTS = [
+    ["快照", "真实 AgentState 的 save → load round-trip", "锁住 model_dump(mode=\"json\") 可序列化"],
+    ["快照", "缺失 → None；损坏 / 版本不符 / 结构非法 → SnapshotLoadError", "S6-3：不静默清空，坏文件保留"],
+    ["快照", "写失败 → SnapshotWriteError，且不留 .tmp", "原子写失败可观测"],
+    ["恢复", "重启后恢复完整 context 并继续，含上轮卡片（reply_context）", "S6-1 / S6-6"],
+    ["真实", "1 轮真模型问答 → 新进程恢复（0 API 调用）", "真数据落在 data/sessions/"],
+    ["流水", "重启前后轮次连续：3 轮恰好 6 行、turn = 1,1,2,2,3,3", "S6-2"],
+    ["失败", "失败轮不落盘、会话被逐出", "下一轮成功快照不含残渣"],
+    ["列表", "按买家过滤、last_active_at 倒序、turn_count 正确", "S6-5 列表契约"],
+    ["并发", "同会话并发串行 + 两轮都进快照（journal 4 行）", "S6-4 持久化版"],
+    ["并发", "LRU 跳过在飞会话 + 等待锁期间被逐出 → 重载", "评审补的回归测试"],
+    ["错误", "快照失败 → 500；流水失败 → 200 + warning", "路由映射"],
+  ];
+  $("tests").innerHTML =
+    `<div class="trow head"><span>面</span><span>用例</span><span>钉住什么</span><span></span></div>` +
+    TESTS.map(([a, b, c]) =>
+      `<div class="trow"><span class="bh">${a}</span><span class="sc">${b}</span>` +
+      `<span class="bh">${c}</span><span class="tstat pass">PASS</span></div>`).join("");
+
+  // ---------- 六条验收 ----------
+  const ACC = [
+    ["S6-1", "杀进程重启 → 追问「刚才第一个多少钱」→ 答对", "离线链 + 真模型 1+1（真实快照）"],
+    ["S6-2", "轮次行数 = 实际问答轮数（每成功轮 2 行）", "3 轮 6 行，turn 连续"],
+    ["S6-3", "手工改坏快照 → 明确报错，不静默清空", "SnapshotLoadError → 500"],
+    ["S6-4", "同 session 两请求 → 会话锁串行（持久化版）", "快照 4 条，journal 4 行"],
+    ["S6-5", "会话列表按 last_active_at 倒序", "GET /commerce/sessions"],
+    ["S6-6", "恢复后的 Agent 知道上一轮推荐过哪些商品", "reply_context.structured_output 含 sku_id"],
+  ];
+  $("acceptance").innerHTML =
+    `<div class="trow head"><span>ID</span><span>清单原文</span><span>证据</span><span></span></div>` +
+    ACC.map(([id, txt, ev]) =>
+      `<div class="trow"><span class="tid">${id}</span><span class="sc">${txt}</span>` +
+      `<span class="bh">${ev}</span><span class="tstat pass">PASS</span></div>`).join("");
+</script>

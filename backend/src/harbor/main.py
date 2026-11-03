@@ -26,12 +26,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.app_version,
         settings.app_env,
     )
-    # S5: assemble the shared read-only runtime once at startup (products + index
-    # + reranker + model), then hand out a fresh per-session Agent from the store.
+    # S6: the repository is cheap and always available; the chat store needs a model.
+    repo = SessionRepository(settings.sessions_dir)
+    app.state.session_repository = repo
     if settings.llm_configured:
         logger.info("Assembling shared runtime + chat session store…")
         runtime = build_runtime(settings)
-        repo = SessionRepository(settings.sessions_dir)
         app.state.chat_store = SessionStore(
             agent_factory=lambda state: build_agent(runtime, state=state),
             repository=repo,
