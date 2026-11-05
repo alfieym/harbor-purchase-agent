@@ -6,13 +6,23 @@ sub-agent's own ``product_search`` calls actually returned. That asymmetry is
 the whole point: the parent may trust the evidence, not the narrator.
 """
 
-from collections.abc import Mapping
+import asyncio
+import json
+import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
+from agentscope.message import TextBlock, ToolResultState
+from agentscope.state import AgentState
+from agentscope.tool import FunctionTool, ToolChunk
 from pydantic import BaseModel, Field
 
 from harbor.agents.tools import FixedSearchConstraints
+
+DISPATCH_STATE_KEY = "harbor.dispatch"
+_LEDGER_HISTORY = 5
 
 
 @dataclass(frozen=True)
@@ -139,3 +149,241 @@ def verify_claims(
             )
         )
     return refs, sorted(observed)
+
+
+class DispatchTaskArgs(BaseModel):
+    """One self-contained task inside a dispatch batch."""
+
+    goal: str = Field(description="一句话任务说明，必须自包含：子 Agent 看不到对话历史")
+    category: str | None = None
+    price_max_major: float | None = None
+    currency: str = "CNY"
+    weight_max_kg: float | None = None
+    excluded_material_tags: list[str] = Field(default_factory=list)
+    known_product_ids: list[str] = Field(default_factory=list)
+
+
+class TaskDispatchArgs(BaseModel):
+    """Arguments the model supplies when it calls ``task_dispatch``."""
+
+    tasks: list[DispatchTaskArgs] = Field(default_factory=list)
+
+
+def build_briefs(
+    tasks: Sequence[DispatchTaskArgs],
+    blacklist: Sequence[str],
+) -> list[TaskBrief]:
+    """Turn model-supplied tasks into briefs, merging the buyer's blacklist."""
+    briefs: list[TaskBrief] = []
+    for index, task in enumerate(tasks, start=1):
+        excluded = list(task.excluded_material_tags)
+        excluded.extend(tag for tag in blacklist if tag not in excluded)
+        briefs.append(
+            TaskBrief(
+                task_id=f"t{index}",
+                goal=task.goal,
+                category=task.category,
+                price_max_major=task.price_max_major,
+                currency=task.currency,
+                weight_max_kg=task.weight_max_kg,
+                excluded_material_tags=tuple(excluded),
+                known_product_ids=tuple(task.known_product_ids),
+            )
+        )
+    return briefs
+
+
+def read_dispatch_ledger(state: AgentState | None) -> dict[str, Any]:
+    """Return the dispatch plan stored in the session's middle context."""
+    if state is None:
+        return {}
+    return dict(state.middle_context.get(DISPATCH_STATE_KEY, {}) or {})
+
+
+def _batch_order(key: str) -> int:
+    try:
+        return int(key[1:])
+    except ValueError:
+        return 0
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _failed(task_id: str, summary: str) -> DispatchResult:
+    return DispatchResult(
+        task_id=task_id,
+        ok=False,
+        summary=summary,
+        evidence_refs=[],
+        verified_product_ids=[],
+    )
+
+
+def _status_of(result: DispatchResult) -> str:
+    if result.ok:
+        return "ok"
+    return "timeout" if "超时" in result.summary else "failed"
+
+
+def make_task_dispatch_tool(
+    memory,
+    runner,
+    *,
+    max_concurrency: int = 3,
+    task_timeout_seconds: float = 90.0,
+    batch_timeout_seconds: float = 75.0,
+    max_tasks: int = 6,
+) -> FunctionTool:
+    """Build the ``task_dispatch`` tool.
+
+    ``runner`` has ``async run(brief) -> SubAgentRun``. Tasks run concurrently,
+    bounded by a semaphore; every failure mode (exception, task timeout, batch
+    deadline) becomes a ``ok=false`` *success* result so the parent turn keeps
+    going (S9-4).
+    """
+    semaphore = asyncio.Semaphore(max_concurrency)
+    # A module-level lock would bind to the first contending event loop; tests
+    # (and any process embedding more than one loop) would then break. Each
+    # agent builds its own dispatch tool, so a per-tool lock is the right scope.
+    ledger_lock = asyncio.Lock()
+
+    async def _record(
+        state: AgentState | None, batch_key: str, entries: dict[str, Any]
+    ) -> None:
+        if state is None:
+            return
+        async with ledger_lock:
+            current = read_dispatch_ledger(state)
+            batches = dict(current.get("batches", {}))
+            batches[batch_key] = entries
+            ordered = sorted(batches.items(), key=lambda item: _batch_order(item[0]))
+            state.middle_context[DISPATCH_STATE_KEY] = {
+                "revision": max(int(current.get("revision", 0)), int(batch_key[1:])),
+                "batches": dict(ordered[-_LEDGER_HISTORY:]),
+            }
+
+    async def task_dispatch(
+        tasks: list[DispatchTaskArgs] | None = None,
+        _agent_state: AgentState | None = None,
+    ) -> ToolChunk:
+        def reply(payload: dict[str, Any]) -> ToolChunk:
+            return ToolChunk(
+                content=[TextBlock(text=json.dumps(payload, ensure_ascii=False))],
+                state=ToolResultState.SUCCESS,
+            )
+
+        raw = [_coerce_task(task) for task in (tasks or [])]
+        if not raw:
+            return reply({"ok": False, "code": "empty_tasks", "results": []})
+        if len(raw) > max_tasks:
+            return reply(
+                {"ok": False, "code": "too_many_tasks", "max_tasks": max_tasks, "results": []}
+            )
+
+        blacklist = (
+            memory.blacklisted_material_tags(_agent_state)
+            if memory is not None and _agent_state is not None
+            else ()
+        )
+        briefs = build_briefs(raw, blacklist)
+
+        started_at = {brief.task_id: _now() for brief in briefs}
+        # Claim the revision *and* write the running entries in one critical
+        # section; claiming alone would let two concurrent calls both read the
+        # same old revision and collide on ``b1``.
+        async with ledger_lock:
+            current = read_dispatch_ledger(_agent_state)
+            revision = int(current.get("revision", 0)) + 1
+            batch_key = f"b{revision}"
+            if _agent_state is not None:
+                batches = dict(current.get("batches", {}))
+                batches[batch_key] = {
+                    brief.task_id: {
+                        "goal": brief.goal,
+                        "status": "running",
+                        "started_at": started_at[brief.task_id],
+                    }
+                    for brief in briefs
+                }
+                ordered = sorted(batches.items(), key=lambda item: _batch_order(item[0]))
+                _agent_state.middle_context[DISPATCH_STATE_KEY] = {
+                    "revision": revision,
+                    "batches": dict(ordered[-_LEDGER_HISTORY:]),
+                }
+
+        deadline = time.monotonic() + batch_timeout_seconds
+        started = time.perf_counter()
+
+        async def run_one(brief: TaskBrief) -> DispatchResult:
+            async with semaphore:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return _failed(brief.task_id, "批次超时未完成")
+                batch_limited = remaining <= task_timeout_seconds
+                try:
+                    run = await asyncio.wait_for(
+                        runner.run(brief), timeout=min(task_timeout_seconds, remaining)
+                    )
+                except TimeoutError:
+                    return _failed(
+                        brief.task_id,
+                        "批次超时未完成" if batch_limited else "子任务超时",
+                    )
+                except Exception as exc:  # degrade, never fail the whole turn
+                    return _failed(brief.task_id, f"子任务失败：{exc}")
+            refs, verified_ids = verify_claims(run.output, run.observed)
+            return DispatchResult(
+                task_id=brief.task_id,
+                ok=True,
+                summary=run.output.summary[:400],
+                evidence_refs=refs,
+                verified_product_ids=verified_ids,
+            )
+
+        results = await asyncio.gather(*(run_one(brief) for brief in briefs))
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+        finished_at = _now()
+        await _record(
+            _agent_state,
+            batch_key,
+            {
+                result.task_id: {
+                    "goal": briefs[index].goal,
+                    "status": _status_of(result),
+                    "started_at": started_at[result.task_id],
+                    "finished_at": finished_at,
+                    "verified_product_ids": result.verified_product_ids,
+                    "summary": result.summary,
+                }
+                for index, result in enumerate(results)
+            },
+        )
+
+        return reply(
+            {
+                "dispatched": len(results),
+                "concurrency": max_concurrency,
+                "elapsed_ms": elapsed_ms,
+                "results": [result.model_dump(mode="json") for result in results],
+            }
+        )
+
+    return FunctionTool(
+        task_dispatch,
+        name="task_dispatch",
+        description=(
+            "把一批互不依赖的检索任务并发派给只读子 Agent；每个任务返回结论、"
+            "证据与核验过的商品 id，中间过程不进入你的上下文。简单请求自己做，不要派。"
+        ),
+        input_schema=TaskDispatchArgs,
+        is_state_injected=True,
+    )
+
+
+def _coerce_task(task: DispatchTaskArgs | Mapping[str, Any]) -> DispatchTaskArgs:
+    if isinstance(task, DispatchTaskArgs):
+        return task
+    return DispatchTaskArgs.model_validate(task)
