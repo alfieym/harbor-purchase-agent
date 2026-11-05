@@ -96,6 +96,11 @@ class Settings(BaseSettings):
     context_archive_dir: Path = (
         Path(__file__).resolve().parents[4] / "data" / "sessions" / "archives"
     )
+    # S8: long-term preference memory. Text + embedding share one SQLite row,
+    # so preferences survive restarts without a second store to keep in sync.
+    memory_db_path: Path = (
+        Path(__file__).resolve().parents[4] / "data" / "sessions" / "memory.sqlite3"
+    )
 
     @property
     def is_development(self) -> bool:

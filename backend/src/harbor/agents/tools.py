@@ -10,6 +10,7 @@ import json
 from decimal import Decimal
 
 from agentscope.message import TextBlock, ToolResultState
+from agentscope.state import AgentState
 from agentscope.tool import FunctionTool, ToolChunk
 from pydantic import BaseModel, Field
 
@@ -73,8 +74,14 @@ def _search_result_to_dict(result: SearchResult, target_currency: str) -> dict:
     }
 
 
-def make_product_search_tool(service) -> FunctionTool:
-    """Build the ``product_search`` tool backed by a ``CatalogSearchService``."""
+def make_product_search_tool(service, memory=None) -> FunctionTool:
+    """Build the ``product_search`` tool backed by a ``CatalogSearchService``.
+
+    ``memory`` (a ``PreferenceMemory``) makes the user's material dislikes a
+    *hard* filter: they are merged into ``excluded_material_tags`` here, before
+    the spec reaches the search service, so the exclusion holds even when the
+    model forgets to pass them (S8-8).
+    """
 
     async def product_search(
         query: str,
@@ -83,7 +90,15 @@ def make_product_search_tool(service) -> FunctionTool:
         currency: str = "CNY",
         weight_max_kg: float | None = None,
         excluded_material_tags: list[str] | None = None,
+        _agent_state: AgentState | None = None,
     ) -> ToolChunk:
+        excluded = list(excluded_material_tags or [])
+        if memory is not None and _agent_state is not None:
+            # Union, not replace: a material the user asked to skip this turn and
+            # one remembered from months ago are both exclusions.
+            for tag in memory.blacklisted_material_tags(_agent_state):
+                if tag not in excluded:
+                    excluded.append(tag)
         spec = ProductSearchSpec(
             normalized_query=query,
             price_max_major=(
@@ -92,7 +107,7 @@ def make_product_search_tool(service) -> FunctionTool:
             currency=currency,
             category=category,
             weight_max_kg=weight_max_kg,
-            excluded_material_tags=list(excluded_material_tags or []),
+            excluded_material_tags=excluded,
         )
         # ``service.search`` is synchronous (Qdrant + embedding HTTP), so offload
         # it to a worker thread — otherwise it blocks the event loop and two
@@ -112,8 +127,9 @@ def make_product_search_tool(service) -> FunctionTool:
         name="product_search",
         description=(
             "在商品目录里检索满足条件的商品。query 是自然语言描述，其余是可选的硬约束"
-            "（类目、预算、币种、重量、排除材质）。返回命中商品（含最低价 SKU）以及"
-            "被硬约束过滤掉的商品与原因。"
+            "（类目、预算、币种、重量、排除材质）。用户长期不喜欢的材质会自动加入排除，"
+            "无需你重复填写。返回命中商品（含最低价 SKU）以及被硬约束过滤掉的商品与原因。"
         ),
         input_schema=ProductSearchArgs,
+        is_state_injected=True,
     )

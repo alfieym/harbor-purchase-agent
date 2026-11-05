@@ -71,7 +71,8 @@ def main(data_path: Path | None = None) -> None:
         )
         raise SystemExit(1)
     runtime = build_runtime(settings, data_path=data_path)
-    asyncio.run(run_repl(build_agent(runtime)))
+    # The CLI has one implicit buyer, so long-term memory still works there.
+    asyncio.run(run_repl(build_agent(runtime, buyer_id="cli")))
 
 
 if __name__ == "__main__":

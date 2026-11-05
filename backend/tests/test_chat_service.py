@@ -365,7 +365,7 @@ def test_get_or_create_restores_state_from_repository(tmp_path) -> None:
     assert len(received) == 1 and received[0] is not None
 
 
-def test_get_or_create_passes_none_when_no_snapshot(tmp_path) -> None:
+def test_get_or_create_starts_a_fresh_state_when_no_snapshot(tmp_path) -> None:
     repo = SessionRepository(tmp_path)
     received: list[AgentState | None] = []
 
@@ -375,7 +375,22 @@ def test_get_or_create_passes_none_when_no_snapshot(tmp_path) -> None:
 
     store = SessionStore(agent_factory=factory, repository=repo)
     asyncio.run(store.get_or_create("u1", "s1"))
-    assert received == [None]
+    assert received[0] is not None
+    assert received[0].context == []
+
+
+def test_session_store_injects_buyer_identity_into_state() -> None:
+    received: list[AgentState | None] = []
+
+    def factory(state: AgentState | None = None) -> FakeAgent:
+        received.append(state)
+        return FakeAgent(output=_cards_dict())
+
+    store = SessionStore(agent_factory=factory)
+    asyncio.run(store.get_or_create("u7", "s1"))
+
+    assert received[0] is not None
+    assert received[0].middle_context["harbor.identity"] == {"buyer_id": "u7"}
 
 
 def test_persist_writes_snapshot_and_journal(tmp_path) -> None:

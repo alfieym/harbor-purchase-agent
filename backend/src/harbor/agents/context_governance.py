@@ -34,13 +34,16 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentscope.agent import ContextConfig
 from agentscope.message import DataBlock, Msg, TextBlock, ToolCallBlock, ToolResultBlock, UserMsg
 from agentscope.middleware import MiddlewareBase
 from agentscope.permission import PermissionBehavior, PermissionDecision
 from agentscope.tool import FunctionTool, ToolChunk
+
+if TYPE_CHECKING:  # ``preferences`` imports this module, so keep the edge one-way
+    from harbor.agents.preferences import PreferenceMemory
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,13 @@ GOVERNANCE_STATE_KEY = "harbor.context_governance"
 # bounded. Dedupe runs first (by semantic key), then the cap keeps the most
 # recent entries; a normal session never reaches it.
 MAX_PREFERENCES = 24
+# S8: the three scopes are injected *side by side*, not pre-arbitrated. The
+# header tells the model that a narrower scope is a better fit for right now,
+# and that a genuine conflict is its call to weigh (or to confirm with the user).
+S8_PREFERENCE_HEADER = (
+    "用户偏好（[本轮] 只影响这一轮，[本会话] 随会话保存，[长期] 跨会话保存。"
+    "作用域越窄越贴合当下；互相冲突时你自己权衡，必要时向用户确认）："
+)
 _CARD_TOOL = "GenerateStructuredOutput"
 _SAFE_COMPONENT = re.compile(r"[^A-Za-z0-9_.-]+")
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
@@ -73,7 +83,12 @@ _PREFERENCE_CUES = re.compile(r"预算|以内|以下|不超过|最多|不要|避
 # A question is not a constraint ("我预算多少？" contains 预算 but states nothing).
 _QUESTION_CUES = re.compile(r"多少|吗|呢|是否|什么|哪|怎么|如何|有没有|是不是|几[个件款种]")
 # Repeated constraints differ only by a conversational prefix ("第14轮：…").
-_PREFERENCE_PREFIX_NOISE = re.compile(r"^第\s*\d+\s*(?:轮|次)\s*[：:,，、]?\s*")
+# Conversational prefixes peeled off before two clauses are compared: a
+# transcript clause may start with "第4轮：", and a model restating a preference
+# often drops the leading "我". Neither changes what the user wants.
+_PREFERENCE_PREFIX_NOISE = re.compile(
+    r"^(?:(?:第\s*\d+\s*(?:轮|次)\s*[：:,，、]?\s*)|(?:(?:我|我们|咱们)\s*))+"
+)
 _CLAUSE_SPLIT = re.compile(r"[。！？!?\n]+")
 
 
@@ -403,6 +418,11 @@ def _normalize_preferences(preferences: Iterable[str]) -> list[str]:
     return list(unique.values())[-MAX_PREFERENCES:]
 
 
+def _with_ids(items) -> list[tuple[str, str]]:
+    """``Preference`` records as ``(id, text)`` pairs for rendering."""
+    return [(item.id, item.text) for item in items]
+
+
 def _appendix_text(summary: str | list[TextBlock | DataBlock]) -> str:
     """The machine-generated appendix from an earlier compression, if any."""
     text = _summary_text(summary)
@@ -534,17 +554,22 @@ class ContextGovernanceMiddleware(MiddlewareBase):
         offloader: SessionArchiveOffloader,
         protect_turns: int = 2,
         gate_ratio: float = 0.85,
+        preferences: "PreferenceMemory | None" = None,
         log: logging.Logger | None = None,
     ) -> None:
         self._offloader = offloader
         self._protect_turns = protect_turns
         self._gate_ratio = gate_ratio
+        self._preferences = preferences
         self._log = log or logger
         self._gate_error: ContextCapacityError | None = None
 
     async def on_reply(self, agent, input_kwargs, next_handler):
         # A capacity failure belongs to one turn; the next turn starts clean.
         self._gate_error = None
+        if self._preferences is not None:
+            # Turn scope dies here; session and long-term survive into the reply.
+            await self._preferences.begin_turn(agent.state)
         # S6 derived ``turn_count`` from the context; compression shrinks it, so
         # the counter now lives in the middleware state (part of the snapshot).
         # Seed from the derived count for snapshots written before S7.
@@ -676,7 +701,18 @@ class ContextGovernanceMiddleware(MiddlewareBase):
         Preferences never enter the system prompt or the persisted context:
         the system prompt keeps a stable prefix for provider-side caching, and
         the injected message is rebuilt for each model call.
+
+        With S8 memory wired, the three scopes are rendered side by side (with
+        their ids, so the model can update or delete them). The S7 heuristic
+        remains the fallback for sessions whose preferences only exist in the
+        transcript — a snapshot written before S8, or a store that is down.
         """
+        if self._preferences is not None:
+            scoped = self._scoped_preference_block(agent.state)
+            pending = self._pending_block(agent.state)
+            if scoped or pending:
+                content = "\n\n".join(part for part in (scoped, pending) if part)
+                return [*messages, UserMsg(name="user", content=content)]
         preferences = _normalize_preferences(
             preference_facts(agent.state.context) + preferences_from_appendix(agent.state.summary)
         )
@@ -690,6 +726,87 @@ class ContextGovernanceMiddleware(MiddlewareBase):
             ]
         )
         return [*messages, UserMsg(name="user", content=body)]
+
+    def _scoped_preference_block(self, state) -> str:
+        """Render turn → session → long-term, skipping empty scopes.
+
+        Each section is capped independently: a crowded long-term list must not
+        crowd out the constraint the user stated this turn. Returns ``""`` when
+        all three scopes are empty, so the caller can fall back to S7.
+        """
+        assert self._preferences is not None
+        # Local import: ``preferences`` imports this module for the shared text
+        # helpers, so a module-level import here would be circular.
+        from harbor.agents.preferences import merged_session_items
+
+        heuristic = _normalize_preferences(
+            preference_facts(state.context) + preferences_from_appendix(state.summary)
+        )
+        sections = (
+            ("本轮", _with_ids(self._preferences.turn_items("preference"))),
+            (
+                "本会话",
+                merged_session_items(
+                    self._preferences.session_items(state, "preference"), heuristic
+                ),
+            ),
+            # Long-term lines carry the record's version: an update without it
+            # cannot be checked for staleness (S8-4).
+            (
+                "长期",
+                [
+                    (item.id, f"{item.text}（v{item.version}）")
+                    for item in self._preferences.long_term_items("preference")
+                ],
+            ),
+        )
+        lines = [
+            f"[{label}] {identifier} {text}" if identifier else f"[{label}] {text}"
+            for label, items in sections
+            for identifier, text in items[:MAX_PREFERENCES]
+        ]
+        line = self._dislike_lines(state)
+        lines.extend(line)
+        if not lines:
+            return ""
+        return "\n".join([f"<system-info>{S8_PREFERENCE_HEADER}", *lines, "</system-info>"])
+
+    def _dislike_lines(self, state) -> list[str]:
+        """Materials the user rejected, tagged so the reason is not lost."""
+        assert self._preferences is not None
+        collections = (
+            ("本轮·不喜欢", self._preferences.turn_items("dislike")),
+            ("本会话·不喜欢", self._preferences.session_items(state, "dislike")),
+            ("长期·不喜欢", self._preferences.long_term_items("dislike")),
+        )
+        lines: list[str] = []
+        for label, items in collections:
+            for item in items[:MAX_PREFERENCES]:
+                tags = f"（材质：{'、'.join(item.material_tags)}）" if item.material_tags else ""
+                lines.append(f"[{label}] {item.id} {item.text}{tags}")
+        return lines
+
+    def _pending_block(self, state) -> str:
+        """Unconfirmed writes: named every turn until the user answers (S8-6).
+
+        The exact phrase 「还有待确认的记忆操作」 is the acceptance signal, and
+        the instruction tells the model the two tools that resolve it.
+        """
+        assert self._preferences is not None
+        pending = self._preferences.pending_items(state)
+        if not pending:
+            return ""
+        lines = [
+            "<system-info>还有待确认的记忆操作（尚未写入）：",
+            *(
+                f"[待确认] {item.id} scope={item.scope} {item.text}"
+                + (f"（材质：{'、'.join(item.material_tags)}）" if item.material_tags else "")
+                for item in pending[:MAX_PREFERENCES]
+            ),
+            "先向用户确认；同意后调用 confirm_preference，拒绝则 cancel_preference。",
+            "</system-info>",
+        ]
+        return "\n".join(lines)
 
     @property
     def _gate_tripped(self) -> bool:

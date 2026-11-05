@@ -43,10 +43,12 @@ from harbor.agents.context_governance import (
     recorded_turn_count,
     validate_summary,
 )
+from harbor.agents.preferences import PreferenceMemory
 from harbor.core.config import Settings
 from harbor.core.errors import install_error_handlers
 from harbor.features.chat.router import router
 from harbor.features.chat.service import SessionStore, run_turn
+from harbor.features.memory.sqlite_store import SqliteMemoryStore
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -859,3 +861,204 @@ def test_real_compression_rolls_back_an_invented_sku(tmp_path: Path) -> None:
     assert agent.state.context == before
     assert agent.state.summary == ""
     assert offloader.last_batch is None
+
+
+# ---------------------------------------------------------------------------
+# S8: three-scope preference injection
+# ---------------------------------------------------------------------------
+
+
+class _FakeEmbedder:
+    def embed(self, texts):
+        return [[1.0, 0.0] for _ in texts]
+
+
+def _s8_memory(tmp_path: Path) -> PreferenceMemory:
+    store = SqliteMemoryStore(tmp_path / "memory.sqlite3")
+    return PreferenceMemory(buyer_id="b1", store=store, embedder=_FakeEmbedder(), vector_model="m1")
+
+
+async def _seed_scopes(memory: PreferenceMemory, state: AgentState) -> None:
+    await memory.begin_turn(state)
+    await memory.add(state, "long_term", "预算 500 以内")
+    await memory.add(state, "turn", "这次先看看 2000 以内的")
+    await memory.add(state, "session", "只考虑母婴宠物类目")
+
+
+def _injected_text(middleware, agent) -> str:
+    _, calls = _call(middleware, agent)
+    injected = calls[0]["messages"][-1]
+    assert injected.role == "user"
+    return injected.get_text_content() or ""
+
+
+def test_injection_renders_three_scopes_in_order(tmp_path: Path) -> None:
+    memory = _s8_memory(tmp_path)
+    agent = FakeAgent()
+    _run(_seed_scopes(memory, agent.state))
+    middleware = ContextGovernanceMiddleware(
+        offloader=SessionArchiveOffloader(tmp_path), preferences=memory
+    )
+
+    text = _injected_text(middleware, agent)
+
+    turn = memory.turn_items()[0]
+    session = memory.session_items(agent.state)[0]
+    long_term = memory.long_term_items()[0]
+    assert f"[本轮] {turn.id} {turn.text}" in text
+    assert f"[本会话] {session.id} {session.text}" in text
+    assert f"[长期] {long_term.id} {long_term.text}" in text
+    assert text.index("[本轮]") < text.index("[本会话]") < text.index("[长期]")
+
+
+def test_injection_omits_empty_scopes(tmp_path: Path) -> None:
+    memory = _s8_memory(tmp_path)
+    agent = FakeAgent()
+    # No transcript constraints either: the heuristic must not invent a section.
+    agent.state.context = []
+    _run(memory.begin_turn(agent.state))
+    _run(memory.add(agent.state, "long_term", "预算 500 以内"))
+    middleware = ContextGovernanceMiddleware(
+        offloader=SessionArchiveOffloader(tmp_path), preferences=memory
+    )
+
+    text = _injected_text(middleware, agent)
+    section_lines = [line for line in text.splitlines() if line.startswith("[")]
+
+    assert len(section_lines) == 1
+    assert section_lines[0].startswith("[长期] ")
+
+
+def test_injection_falls_back_to_s7_when_no_memory(tmp_path: Path) -> None:
+    agent = FakeAgent()
+    middleware = ContextGovernanceMiddleware(offloader=SessionArchiveOffloader(tmp_path))
+
+    text = _injected_text(middleware, agent)
+
+    # FakeAgent's conversation contains "预算 600", which the S7 heuristic keeps.
+    assert "会话偏好" in text
+    assert "预算 600" in text
+    assert "[本轮]" not in text
+
+
+def test_injection_does_not_touch_state_context(tmp_path: Path) -> None:
+    memory = _s8_memory(tmp_path)
+    agent = FakeAgent()
+    _run(_seed_scopes(memory, agent.state))
+    before = list(agent.state.context)
+    middleware = ContextGovernanceMiddleware(
+        offloader=SessionArchiveOffloader(tmp_path), preferences=memory
+    )
+
+    text = _injected_text(middleware, agent)
+
+    assert agent.state.context == before
+    assert "只考虑母婴宠物类目" not in "\n".join(
+        message.get_text_content() or "" for message in agent.state.context
+    )
+    assert text  # the constraint lives only in the injected message
+
+
+def test_begin_turn_clears_only_turn_scope(tmp_path: Path) -> None:
+    memory = _s8_memory(tmp_path)
+    agent = FakeAgent()
+    _run(_seed_scopes(memory, agent.state))
+    middleware = ContextGovernanceMiddleware(
+        offloader=SessionArchiveOffloader(tmp_path), preferences=memory
+    )
+
+    async def reply_chain(**kwargs):
+        yield "event"
+
+    _run(_collect(middleware.on_reply(agent, {}, reply_chain)))
+
+    assert memory.turn_items() == []
+    assert [item.text for item in memory.session_items(agent.state)] == ["只考虑母婴宠物类目"]
+    assert [item.text for item in memory.long_term_items()] == ["预算 500 以内"]
+
+
+def test_injection_merges_explicit_session_records_with_the_heuristic(tmp_path: Path) -> None:
+    memory = _s8_memory(tmp_path)
+    agent = FakeAgent()
+    _run(memory.begin_turn(agent.state))
+    session = _run(memory.add(agent.state, "session", "预算 600"))
+    middleware = ContextGovernanceMiddleware(
+        offloader=SessionArchiveOffloader(tmp_path), preferences=memory
+    )
+
+    text = _injected_text(middleware, agent)
+    session_lines = [line for line in text.splitlines() if line.startswith("[本会话]")]
+
+    # FakeAgent's conversation also says "预算 600"; the explicit record wins
+    # (it has the id), so the restated heuristic must not add a second line.
+    assert session_lines == [f"[本会话] {session.preference.id} 预算 600"]
+
+
+def test_injection_names_the_operations_still_awaiting_confirmation(tmp_path: Path) -> None:
+    """S8-6: an unanswered add is not a memory, but it is not lost either."""
+    memory = _s8_memory(tmp_path)
+    agent = FakeAgent()
+    agent.state.context = []
+    _run(memory.begin_turn(agent.state))
+    pending = _run(memory.stage(agent.state, "long_term", "我以后只看官方店"))
+    middleware = ContextGovernanceMiddleware(
+        offloader=SessionArchiveOffloader(tmp_path), preferences=memory
+    )
+
+    text = _injected_text(middleware, agent)
+
+    assert "还有待确认的记忆操作" in text
+    assert f"[待确认] {pending.id} scope=long_term" in text
+    # Nothing was written: there is no scope section to show.
+    assert "[长期]" not in text
+
+
+def test_a_pending_operation_is_still_named_after_a_new_turn(tmp_path: Path) -> None:
+    memory = _s8_memory(tmp_path)
+    agent = FakeAgent()
+    _run(memory.begin_turn(agent.state))
+    pending = _run(memory.stage(agent.state, "session", "只考虑母婴宠物类目"))
+
+    _run(memory.begin_turn(agent.state))
+    middleware = ContextGovernanceMiddleware(
+        offloader=SessionArchiveOffloader(tmp_path), preferences=memory
+    )
+
+    text = _injected_text(middleware, agent)
+
+    assert f"[待确认] {pending.id} scope=session" in text
+
+
+def test_injection_labels_a_dislike_with_its_materials(tmp_path: Path) -> None:
+    memory = _s8_memory(tmp_path)
+    agent = FakeAgent()
+    agent.state.context = []
+    _run(memory.begin_turn(agent.state))
+    added = _run(
+        memory.add(
+            agent.state, "long_term", "不要塑料的", kind="dislike", material_tags=("塑料", "玻璃")
+        )
+    )
+    middleware = ContextGovernanceMiddleware(
+        offloader=SessionArchiveOffloader(tmp_path), preferences=memory
+    )
+
+    text = _injected_text(middleware, agent)
+
+    assert f"[长期·不喜欢] {added.preference.id} 不要塑料的（材质：塑料、玻璃）" in text
+
+
+def test_long_term_lines_carry_their_version(tmp_path: Path) -> None:
+    """S8-4: the model cannot send ``expected_version`` it never saw."""
+    memory = _s8_memory(tmp_path)
+    agent = FakeAgent()
+    agent.state.context = []
+    _run(memory.begin_turn(agent.state))
+    added = _run(memory.add(agent.state, "long_term", "预算 500 以内"))
+    middleware = ContextGovernanceMiddleware(
+        offloader=SessionArchiveOffloader(tmp_path), preferences=memory
+    )
+
+    text = _injected_text(middleware, agent)
+
+    assert f"[长期] {added.preference.id} 预算 500 以内（v1）" in text

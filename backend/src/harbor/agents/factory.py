@@ -26,6 +26,11 @@ from harbor.agents.context_governance import (
 )
 from harbor.agents.models import build_chat_model
 from harbor.agents.permissions import allow_product_search_tool
+from harbor.agents.preferences import (
+    IDENTITY_STATE_KEY,
+    PreferenceMemory,
+    make_preference_tools,
+)
 from harbor.agents.prompts import SUMMARY_TEMPLATE, system_prompt_for
 from harbor.agents.tools import make_product_search_tool
 from harbor.core.config import Settings
@@ -34,6 +39,7 @@ from harbor.features.catalog.persistence.seed_products import load_products
 from harbor.features.catalog.search.embedder import Embedder, OpenAIEmbedder
 from harbor.features.catalog.search.rerank import FastembedReranker
 from harbor.features.catalog.search.service import CatalogSearchService
+from harbor.features.memory.sqlite_store import SqliteMemoryStore
 
 DEFAULT_DATA_PATH = Path(__file__).resolve().parents[4] / "data" / "catalog-v1.jsonl"
 INDEX_CACHE_DIR = Path(__file__).resolve().parents[4] / ".cache" / "catalog-index"
@@ -125,6 +131,9 @@ class AgentRuntime:
     service: CatalogSearchService
     model: ChatModelBase
     categories: list[str]
+    # S8: preference writes embed through the same endpoint as search.
+    embedder: Embedder
+    memory_store: SqliteMemoryStore | None
 
 
 def build_runtime(settings: Settings, data_path: Path | None = None) -> AgentRuntime:
@@ -155,22 +164,60 @@ def build_runtime(settings: Settings, data_path: Path | None = None) -> AgentRun
         service=service,
         model=model,
         categories=sorted({product.category for product in products}),
+        embedder=embedder,
+        memory_store=SqliteMemoryStore(settings.memory_db_path),
     )
 
 
-def build_agent(runtime: AgentRuntime, state: AgentState | None = None) -> Agent:
+def _buyer_id_from(state: AgentState | None, explicit: str | None) -> str | None:
+    """``buyer_id`` from the caller, else from the identity the store injected."""
+    if explicit:
+        return explicit
+    if state is None:
+        return None
+    identity = state.middle_context.get(IDENTITY_STATE_KEY)
+    if not isinstance(identity, dict):
+        return None
+    buyer_id = identity.get("buyer_id")
+    return buyer_id if isinstance(buyer_id, str) and buyer_id else None
+
+
+def build_agent(
+    runtime: AgentRuntime,
+    state: AgentState | None = None,
+    *,
+    buyer_id: str | None = None,
+) -> Agent:
     """Assemble a fresh per-session Agent on top of the shared runtime.
 
     ``state`` restores a previous session's full conversation (S6): the store
-    passes the snapshot it loaded from disk, or ``None`` for a brand-new session.
+    passes the snapshot it loaded from disk, or a fresh state. ``buyer_id``
+    comes from that state's injected identity; the explicit argument is for
+    callers without a store (the CLI), and overrides it.
     """
     settings = runtime.settings
     # S7-5: ``legacy`` is the pre-S7 baseline — no middleware, no archive tool,
     # and AgentScope's own compression defaults. ``governed`` wraps every
     # compression and every model call with the S7 guarantees.
     governed = settings.context_strategy == "governed"
-    prompt = system_prompt_for(runtime.categories, archive_enabled=governed)
-    tool = make_product_search_tool(runtime.service)
+    buyer_id = _buyer_id_from(state, buyer_id)
+    prompt = system_prompt_for(
+        runtime.categories, archive_enabled=governed, preferences_enabled=governed
+    )
+    # S8: without a buyer id the turn/session scopes still work; the memory
+    # simply reports ``long_term`` as unavailable instead of failing writes.
+    # Built before the search tool because that tool applies material dislikes.
+    memory = (
+        PreferenceMemory(
+            buyer_id=buyer_id,
+            store=runtime.memory_store,
+            embedder=runtime.embedder,
+            vector_model=settings.openai_embedding_model,
+        )
+        if governed
+        else None
+    )
+    tool = make_product_search_tool(runtime.service, memory=memory)
     if not governed:
         agent = Agent(
             name="purchase_agent",
@@ -192,16 +239,20 @@ def build_agent(runtime: AgentRuntime, state: AgentState | None = None) -> Agent
         # S7: every compression is archived + validated, and every model call is
         # measured against the hard gate before it leaves the process.
         offloader = SessionArchiveOffloader(settings.context_archive_dir)
+        assert memory is not None
         governance = ContextGovernanceMiddleware(
             offloader=offloader,
             protect_turns=settings.context_protect_turns,
             gate_ratio=settings.context_gate_ratio,
+            preferences=memory,
         )
         agent = Agent(
             name="purchase_agent",
             system_prompt=prompt,
             model=runtime.model,
-            toolkit=Toolkit([tool, make_read_archive_tool(offloader)]),
+            toolkit=Toolkit(
+                [tool, make_read_archive_tool(offloader), *make_preference_tools(memory)]
+            ),
             middlewares=[governance],
             state=state,
             offloader=offloader,

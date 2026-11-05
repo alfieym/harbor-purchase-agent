@@ -1,0 +1,783 @@
+<title>S8 三作用域偏好记忆</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --warn: #9A6700; --warn-soft: #FBF3DF; --soft: #3353A6; --soft-soft: #EAF0FB;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --warn: #E0A63C; --warn-soft: #2E2617; --soft: #8FB0E8; --soft-soft: #182238;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --warn: #E0A63C; --warn-soft: #2E2617; --soft: #8FB0E8; --soft-soft: #182238;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(48px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; }
+  header { margin-bottom: 20px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 82ch; }
+  .sub b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.query { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+  .chip.soft { border-color: var(--soft); color: var(--soft); }
+  .chip.warn { border-color: var(--warn); color: var(--warn); }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 14px 16px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .flow-break { flex-basis: 100%; height: 2px; }
+  .flow-step { display: flex; flex-direction: column; align-items: center; min-width: 76px; padding: 2px 8px; }
+  .fidx { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); }
+  .fname { font-size: 14px; font-weight: 600; }
+  .fcount { font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; text-align: center; }
+  .flow-link { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--faint); }
+  .farrow { font-size: 18px; line-height: 1; }
+  .fwhat { font-size: 11px; color: var(--muted); font-family: "IBM Plex Mono", monospace; max-width: 130px; text-align: center; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+
+  .mhead { margin: 36px 0 4px; font-size: 19px; font-weight: 700; }
+  .msub { color: var(--muted); font-size: 13px; margin: 0 0 14px; max-width: 82ch; }
+  .msub b { color: var(--fg); }
+
+  /* --- 卡片 --- */
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+  .card h4 { margin: 0; font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .card p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .card p b { color: var(--fg); }
+  .card code { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; color: var(--fg); word-break: break-word; }
+  .card.gapcard { border-left: 3px solid var(--bad); }
+  .card.promise { border-left: 3px solid var(--accent); }
+  .tag { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px dashed; letter-spacing: .03em; }
+  .tag.hook { color: var(--accent-ink); border-color: var(--accent); }
+  .tag.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+  .tag.ok { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .tag.turn { color: var(--soft); border-color: var(--soft); background: var(--soft-soft); }
+  .tag.session { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .tag.long { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+
+  /* --- 调用链 --- */
+  .chain { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; white-space: pre; overflow-x: auto; line-height: 1.75; }
+  .chain .our { color: var(--accent-ink); font-weight: 500; }
+  .chain .as { color: var(--muted); }
+  .chain .cm { color: var(--faint); }
+
+  /* --- 代码 --- */
+  .code { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+  .code .ln { display: grid; grid-template-columns: 46px 1fr; gap: 10px; padding: 2px 12px; white-space: pre; }
+  .code .no { color: var(--faint); text-align: right; user-select: none; }
+  .code .c { color: var(--muted); }
+  .code .kw { color: var(--accent-ink); }
+  .code .st { color: var(--good); }
+
+  /* --- 文件树 --- */
+  .tree { font-family: "IBM Plex Mono", monospace; font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; white-space: pre; overflow-x: auto; line-height: 1.75; }
+  .tree .d { color: var(--accent-ink); font-weight: 500; }
+  .tree .f { color: var(--fg); }
+  .tree .cm { color: var(--faint); }
+
+  /* --- 重放 --- */
+  .replaybar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .btn { font-family: "IBM Plex Sans", sans-serif; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn.ghost { background: var(--surface); color: var(--accent-ink); border-color: var(--border); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .stepno { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); margin-left: auto; }
+  .narration { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; margin-bottom: 12px; min-height: 46px; }
+  .narration b { color: var(--accent-ink); }
+  .lanes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .lanes { grid-template-columns: 1fr; } }
+  .lane { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; min-height: 210px; min-width: 0; }
+  .lane-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .lane-name { font-weight: 600; font-size: 14px; }
+  .lane-sub { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); }
+  .lane-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; min-width: 0; }
+  .lane-body .empty { color: var(--faint); font-family: "IBM Plex Mono", monospace; }
+  .jline { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; padding: 5px 8px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .jline.ok { border-left: 3px solid var(--good); }
+  .jline.bad { border-left: 3px solid var(--bad); }
+  .jline.new { box-shadow: 0 0 0 2px var(--accent); }
+  .pid { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--faint); margin-right: 6px; }
+  .snapbox { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; }
+  .snapbox .k { color: var(--muted); }
+  .snapbox .v { color: var(--accent-ink); }
+  .snapbox.bad { border-color: var(--bad); }
+
+  /* --- 表 --- */
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; overflow-x: auto; }
+  .trow { display: grid; grid-template-columns: 1.1fr 1.4fr 70px 1.1fr; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); min-width: 620px; }
+  .trow:last-child { border-bottom: 0; }
+  .trow.head { background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .trow .sc { font-size: 13px; min-width: 0; }
+  .trow .bh { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); min-width: 0; }
+  .tstat { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; text-align: center; white-space: nowrap; }
+  .tstat.ok { color: var(--good); background: var(--good-soft); }
+  .tstat.warn { color: var(--warn); background: var(--warn-soft); }
+  .tstat.bad { color: var(--bad); background: var(--bad-soft); }
+  .tstat.info { color: var(--accent-ink); background: var(--surface-2); }
+  #scopes .trow { grid-template-columns: 86px 1.7fr 1.1fr .9fr .9fr .8fr; min-width: 780px; }
+  #tools .trow { grid-template-columns: 1.05fr 1.6fr 1fr 58px; min-width: 640px; }
+  #tests .trow { grid-template-columns: 1.1fr 1.6fr 1.1fr 56px; }
+  #failures .trow { grid-template-columns: 1fr 1.35fr .8fr 1.25fr; }
+
+  /* --- 对照 --- */
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 820px) { .cmp { grid-template-columns: 1fr; } }
+  .cmp .card { min-width: 0; }
+  .cmp .card.before { border-left: 3px solid var(--bad); }
+  .cmp .card.after { border-left: 3px solid var(--good); }
+
+  .note { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+  .note.warn { border-left-color: var(--warn); }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { gap: 2px; padding: 12px 8px; }
+    .flow-step { min-width: 0; padding: 2px 4px; }
+    .farrow { font-size: 15px; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Purchase Agent · S8</p>
+    <h1>三作用域偏好记忆：本轮、本会话、长期</h1>
+    <p class="sub">S7 已经会注入「会话约束」，但它是<b>隐式</b>的：按线索词从用户原话里猜，只活在当前会话，模型不能主动记、不能改、也不能删。S8 把偏好变成<b>显式、可寻址、可跨会话</b>的记录——每条有稳定 id，三个作用域同时注入，冲突不预先仲裁，由模型自己权衡。</p>
+    <div class="chips">
+      <span class="chip query">add · confirm · cancel · update · delete</span>
+      <span class="chip">turn / session / long_term</span>
+      <span class="chip soft">SQLite：事实 + 向量同一行</span>
+      <span class="chip good">两段式：暂存 → 确认落库</span>
+      <span class="chip warn">模型自己权衡</span>
+      <span class="chip good">342 全绿</span>
+    </div>
+
+    <div class="flow" aria-label="S8 写入与注入主流程">
+      <div class="flow-step"><span class="fidx">①</span><span class="fname">用户原话</span><span class="fcount">「以后都…」</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">模型选作用域</span></div>
+      <div class="flow-step"><span class="fidx">②</span><span class="fname">add_preference</span><span class="fcount">五工具之一</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">_clean + 判重</span></div>
+      <div class="flow-step"><span class="fidx">③</span><span class="fname">分流</span><span class="fcount">turn 立即 · 其余暂存</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">session / 长期入队</span></div>
+      <div class="flow-step"><span class="fidx">④</span><span class="fname">待确认提示</span><span class="fcount">下一轮注入</span></div>
+      <div class="flow-break"></div>
+      <div class="flow-step"><span class="fidx">⑤</span><span class="fname">confirm_preference</span><span class="fcount">用户点头</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">仅 long_term</span></div>
+      <div class="flow-step"><span class="fidx">⑥</span><span class="fname">embed</span><span class="fcount">事务之外</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">BEGIN IMMEDIATE</span></div>
+      <div class="flow-step"><span class="fidx">⑦</span><span class="fname">单行同写</span><span class="fcount">text + vector</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">下一轮 on_reply</span></div>
+      <div class="flow-step"><span class="fidx">⑧</span><span class="fname">注入 UserMsg</span><span class="fcount">三段 + 待确认</span></div>
+    </div>
+    <p class="hint">下面依次拆：三个作用域各自存在哪 → 两段式写入 → 长期库怎么保证「事实与向量同生同灭」→ 注入长什么样 → 身份怎么到达工厂 → 工具契约 → 跨两个会话的可交互重放 → 失败语义与测试。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2 class="mhead">三个作用域只差一件事：记录存在哪</h2>
+  <p class="msub">作用域<b>不决定优先级</b>，只决定记录存在哪、活多久。三段注入时并排出现，作用域标签告诉模型「越窄越贴合当下」；真正的冲突留给模型判断。</p>
+  <div class="tbl" id="scopes"></div>
+
+  <div class="grid3" style="margin-top:12px">
+    <div class="card promise">
+      <h4>turn：放在中间件内存 <span class="tag turn">进程内</span></h4>
+      <p>「这次先看看 2000 以内的」只该影响这一次回复。放在 <code>PreferenceMemory._turn</code>，<code>on_reply</code> 开头清空——不进 state、不进快照、不花钱。</p>
+    </div>
+    <div class="card promise">
+      <h4>session：放在 middle_context <span class="tag session">随快照</span></h4>
+      <p>它是一个普通 dict，跟着 S6 的 <code>state.model_dump()</code> 一起持久化。换 <code>shopping_session_id</code> 就是新会话；同一会话进程重启也能恢复。待确认队列也放在这里。</p>
+    </div>
+    <div class="card promise">
+      <h4>long_term：放在 SQLite <span class="tag long">跨会话</span></h4>
+      <p>按 <code>buyer_id</code> 隔离，跨会话、跨进程、重启后仍在。小记录多写，所以选 SQLite 而不是向量库：<b>事实和向量必须同一行</b>。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">写入：两段式——先暂存，确认后落库</h2>
+  <p class="msub">模型通过五个工具写偏好。<code>turn</code> 立即生效；<code>session</code> / <code>long_term</code> 的 add 只进待确认队列，用户点头后 <code>confirm_preference</code> 才真正写入。只有 <code>long_term</code> 需要向量。</p>
+  <div class="code" id="addcode"></div>
+  <div class="grid3" style="margin-top:12px">
+    <div class="card">
+      <h4>模型不能替用户点头 <span class="tag ok">S8-6</span></h4>
+      <p><code>add_preference</code> 只把操作放进 <code>state.middle_context</code> 的 pending 队列，返回 <code>pending: true</code>。队列跨轮、跨快照保留；下一轮注入「还有待确认的记忆操作」，直到 <code>confirm_preference</code> 或 <code>cancel_preference</code>。</p>
+    </div>
+    <div class="card">
+      <h4>去重先于 embedding <span class="tag ok">省额度</span></h4>
+      <p>暂存时按 <code>(scope, kind, _preference_key)</code> 比对，重复调用不会产生两条待确认；落库时 <code>(buyer_id, kind, text_key)</code> 唯一索引再兜住跨会话并发。命中就 <b>不调 embedding、不写库</b>。</p>
+    </div>
+    <div class="card">
+      <h4>embedding 在事务之外 <span class="tag ok">无半行</span></h4>
+      <p>长期 confirm 时先算出向量，再开 <code>BEGIN IMMEDIATE</code>。embedding 失败时事务根本没开始；写失败时操作会<b>放回队列</b>，用户腾出空间后还能重试。</p>
+    </div>
+    <div class="card">
+      <h4>dislike 是结构化记录 <span class="tag ok">代码过滤</span></h4>
+      <p><code>kind="dislike"</code> 必须带 <code>material_tags</code>。黑名单不是靠模型自觉：<code>product_search</code> 会把三个作用域的 dislike 合并进 <code>excluded_material_tags</code>，由检索层硬过滤。</p>
+    </div>
+    <div class="card">
+      <h4>失败不拖垮购物轮 <span class="tag bad">SUCCESS + ok:false</span></h4>
+      <p>所有记忆失败都返回 <code>{"ok": false, ...}</code> 的 <b>SUCCESS</b> chunk。S5 的 ERROR 会映射成 502——一条偏好存不下，不该让整轮购物失败。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">长期存储：一行就是一条完整记忆</h2>
+  <p class="msub">表结构刻意冗余了 <code>kind</code> 与 <code>scope</code>：S8 写 <code>preference</code> 与 <code>dislike</code>，未来加事实记录不需要迁移。旧库启动时用 <code>ALTER TABLE</code> 补齐后三列。</p>
+  <div class="code" id="schemacode"></div>
+  <div class="grid3" style="margin-top:12px">
+    <div class="card">
+      <h4>单条 INSERT / UPDATE <span class="tag ok">同一行</span></h4>
+      <p><code>text</code> 与 <code>vector</code> 出现在同一条语句里。不存在「先写文本、后补向量」的中间态，也就不存在两者不一致的窗口。</p>
+    </div>
+    <div class="card">
+      <h4>查重 + 计数 + 写入同一个事务 <span class="tag ok">S8-3 / S8-5</span></h4>
+      <p><code>BEGIN IMMEDIATE</code> 里先查 <code>text_key</code>、再数已用条数、最后 INSERT。两个会话同时写同一句不会各插一条；第 201 条在计数处被拒，并发也插不进去。</p>
+    </div>
+    <div class="card">
+      <h4>version 写在行上 <span class="tag ok">S8-4</span></h4>
+      <p>每次 update 在 SQL 里 <code>version = version + 1</code>；调用方带着读到的 version 回来，写锁内比对，不一致就抛 <code>MemoryVersionConflict</code>，不覆盖新值。</p>
+    </div>
+    <div class="card">
+      <h4>三层并发保险 <span class="tag ok">跨进程</span></h4>
+      <p>WAL 让读不阻塞写；<code>BEGIN IMMEDIATE</code> 提前拿写锁，两个进程排队而不是迟到失败；<code>busy_timeout=5000</code> 让它们等。进程内再加一把 <code>asyncio.Lock</code>。</p>
+    </div>
+    <div class="card">
+      <h4>float32 小端 BLOB <span class="tag ok">可识别</span></h4>
+      <p><code>struct.pack</code> 打包，长度 = 维度 × 4。同一行记录 <code>vector_model</code>；换 embedding 模型后，旧向量能被识别并跳过相似检索。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">读取：一次 model call 末尾的 UserMsg</h2>
+  <p class="msub">注入仍然由 S7 的中间件负责，S8 只换内容：三段并排、带 id 与 version、dislike 单独成行、待确认操作另起一块，每轮重建。它是末尾的 <code>UserMsg</code>，不是 system prompt，也不写回 <code>state.context</code>。</p>
+  <div class="cmp">
+    <div class="card">
+      <h4>模型实际收到的样子 <span class="tag hook">每次 model call</span></h4>
+      <div class="snapbox" id="injectsample"></div>
+      <p>空的作用域整段省略；三段全空且没有待确认操作时就不注入，回退到 S7 的启发式。只有待确认操作时，第二块单独出现——这正是 <b>S8-6</b> 的可见信号。每段独立限 24 条。</p>
+    </div>
+    <div class="card">
+      <h4>为什么必须在这里注入 <span class="tag ok">S7 闸门</span></h4>
+      <div class="code" id="injectcode"></div>
+      <p>注入发生在 <code>count_tokens</code> 与容量闸门<b>之前</b>。放在别处，注入的 token 不计入 <code>gate_ratio</code>，闸门就会被绕过。</p>
+    </div>
+  </div>
+  <div class="grid3" style="margin-top:12px">
+    <div class="card">
+      <h4>不写回 context <span class="tag ok">前缀稳定</span></h4>
+      <p>注入是「这一帧」的视图，不是对话历史。下一轮重建；system prompt 保持稳定前缀，provider 侧缓存不受影响。</p>
+    </div>
+    <div class="card">
+      <h4>显式 session + S7 启发式合并 <span class="tag ok">不回退</span></h4>
+      <p><code>merged_session_items</code> 按语义键去重：显式记录优先（它带 id，模型才能改删），启发式只补空缺。S8 之前的旧会话仍能注入约束。</p>
+    </div>
+    <div class="card">
+      <h4>id 与 version 都是给模型看的 <span class="tag ok">可寻址</span></h4>
+      <p><code>[长期] pref_bb033c60 以后都只买 500 以内的（v1）</code>——下一轮模型拿着 id 调 update / delete，并原样回传 version；旧值会被 409 拒绝。</p>
+    </div>
+    <div class="card">
+      <h4>不喜欢带材质标签 <span class="tag ok">S8-2 / S8-8</span></h4>
+      <p><code>[长期·不喜欢] pref_5e6f7a8b 不要塑料的杯子（材质：塑料）</code>——标签让撤回可追踪；同一份标签被 <code>product_search</code> 当作代码级过滤条件。</p>
+    </div>
+    <div class="card">
+      <h4>待确认块每轮出现 <span class="tag warn">S8-6</span></h4>
+      <p>只要队列非空，就追加「还有待确认的记忆操作（尚未写入）」。模型因此知道该先问用户，而不是假装已经记住。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">身份：不改工厂签名</h2>
+  <p class="msub">长期记忆需要 <code>buyer_id</code>，但约 25 处测试用 <code>lambda state=None: …</code> 假工厂。<code>agent_factory(state)</code> 的签名一个字符都不能改。</p>
+  <div class="chain" id="chain"></div>
+  <div class="grid3" style="margin-top:10px">
+    <div class="card promise">
+      <h4>先写身份，再建 agent <span class="tag hook">SessionStore</span></h4>
+      <p><code>get_or_create</code> 加载或新建 state 后，把 <code>buyer_id</code> 写进 <code>middle_context["harbor.identity"]</code>，然后才调用工厂。<code>middle_context</code> 随快照持久化，恢复时身份也回来了。</p>
+    </div>
+    <div class="card promise">
+      <h4>显式参数优先 <span class="tag hook">CLI</span></h4>
+      <p><code>build_agent(runtime, state, buyer_id="cli")</code> 覆盖 state 里的身份。命令行没有 <code>SessionStore</code>，但长期记忆照样能用。</p>
+    </div>
+    <div class="card">
+      <h4>没有身份时 <span class="tag warn">长期关闭</span></h4>
+      <p>turn / session 照常工作；long_term 返回 <code>{"ok": false, "error": "长期记忆未启用", "retryable": false}</code>，而不是抛异常。部分单测不传 state，这是有意的默认。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">工具契约</h2>
+  <p class="msub">五个工具都是 <code>is_state_injected=True</code>：AgentScope 把 <code>_agent_state</code> 注入进来，工具的闭包只需要持有 <code>PreferenceMemory</code>，不需要抓 Agent 实例。add 分两段，confirm / cancel 解队列，update 带 version，delete 兼作 dislike 撤回。</p>
+  <div class="tbl" id="tools"></div>
+  <div class="code" style="margin-top:12px" id="toolcode"></div>
+
+  <h2 class="mhead" id="replay">跨两个会话的生命周期（可交互重放）</h2>
+  <p class="msub">跟着点「下一步」：同一个 buyer 走过两个会话。session / 长期的 add 都先暂存、等确认；看「本轮」在下一轮消失、「长期」落进 SQLite 后在新 Agent 里仍被注入，dislike 被撤回，update 让 version 递增、旧 version 得到 409。</p>
+  <div class="replaybar">
+    <button class="btn" id="next">下一步 →</button>
+    <button class="btn ghost" id="reset">重置</button>
+    <span class="stepno" id="stepno"></span>
+  </div>
+  <div class="narration" id="narration"></div>
+  <div class="lanes">
+    <section class="lane">
+      <div class="lane-head"><span class="lane-name">本轮</span><span class="tag turn">进程内</span><span class="lane-sub">PreferenceMemory._turn</span></div>
+      <div class="lane-body" id="lane-turn"></div>
+    </section>
+    <section class="lane">
+      <div class="lane-head"><span class="lane-name">本会话</span><span class="tag session">middle_context</span><span class="lane-sub">随 S6 快照</span></div>
+      <div class="lane-body" id="lane-session"></div>
+    </section>
+    <section class="lane">
+      <div class="lane-head"><span class="lane-name">长期</span><span class="tag long">SQLite</span><span class="lane-sub">memories · buyer u7</span></div>
+      <div class="lane-body" id="lane-long"></div>
+    </section>
+  </div>
+  <div class="inject-wrap" style="margin-top:12px">
+    <div class="lane" style="min-height:0">
+      <div class="lane-head"><span class="lane-name">这一次 model call 的注入</span><span class="lane-sub">尾部 UserMsg</span></div>
+      <div class="lane-body" id="lane-inject"></div>
+    </div>
+  </div>
+  <div class="note">
+    <b>重放展示的是成功路径（含一次 409）。</b>失败分支在下表：未确认、embedding 失败、SQLite 写失败、旧 version、第 201 条、id 不存在、疑问句——都不会让购物轮失败，只会让模型得到一个 <code>ok:false</code> 的工具结果。
+  </div>
+
+  <h2 class="mhead">失败语义</h2>
+  <p class="msub">判断标准：<b>这一步失败时，模型看到什么、磁盘留下什么、这一轮还能不能继续</b>。</p>
+  <div class="tbl" id="failures"></div>
+
+  <h2 class="mhead">S8 测试</h2>
+  <p class="msub">写入路径全部离线覆盖；长期库用真实 SQLite 文件（<code>tmp_path</code>），embedding 全部用确定性假 embedder——<b>测试不消耗任何远程额度</b>。</p>
+  <div class="tbl" id="tests"></div>
+  <div class="note">
+    <b>真额度验收：</b><code>scripts/accept_s8_real.py</code> 用真实 <code>qwen-plus</code> + 假 embedder 跑通 S8-1..S8-8，11 项全 ✓、零远程 embedding：未确认只暂存、下一轮提示、确认后写入且新会话仍生效、撤回 dislike、去重、旧 version 409、第 201 条被拒（dislike 豁免）、「这次」不进长期、材质黑名单合并进检索。<b>总结：342 passed</b>（lint / format / mypy 全绿）。
+  </div>
+
+  <div class="note warn">
+    <b>显式不在 S8：</b>跨 buyer 共享、前端偏好管理页、REST 端点、长期记忆的语义检索注入（当前注入最近 24 条，<code>search_similar</code> 只用于 add 时的相似提醒）、自动作用域推断之外的隐式写入、修改 S6 快照 schema。
+  </div>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  function codelines(lines) {
+    return lines.map((t, i) =>
+      `<div class="ln"><span class="no">${i + 1}</span><span>${t.startsWith("#") ? `<span class="c">${esc(t)}</span>` : esc(t)}</span></div>`).join("");
+  }
+
+  // ---------- 作用域表 ----------
+  const SCOPES = [
+    ["turn", "PreferenceMemory._turn", "一次 agent.reply", "丢弃", "丢弃", "不落", "turn"],
+    ["session", 'middle_context["harbor.preferences"]', "本会话", "没有", "恢复", "落", "session"],
+    ["long_term", "SQLite memories，按 buyer_id", "永久", "仍在", "仍在", "独立", "long"],
+  ];
+  $("scopes").innerHTML =
+    `<div class="trow head"><span>作用域</span><span>存储位置</span><span>活多久</span><span>换会话</span><span>重启</span><span>快照</span></div>` +
+    SCOPES.map(([a, b, c, d, e, f, k]) =>
+      `<div class="trow"><span class="bh"><span class="tag ${k}">${a}</span></span><span class="bh">${esc(b)}</span>` +
+      `<span class="sc">${esc(c)}</span><span class="bh">${d}</span><span class="bh">${e}</span><span class="bh">${f}</span></div>`).join("");
+
+  // ---------- 写入代码 ----------
+  $("addcode").innerHTML = codelines([
+    "# agents/preferences.py — add_preference 工具",
+    "if kind == 'dislike' and not material_tags:",
+    "    return {'ok': False, 'error': 'dislike 需要给出 material_tags'}",
+    "",
+    "if scope == 'turn':                    # 只活一轮：立即生效，不落盘",
+    "    return _add_body(await memory.add(state, scope, text, ...))",
+    "",
+    "pending = await memory.stage(state, scope, text, ...)   # 其余一律先暂存",
+    "return {'ok': True, 'pending': True, 'operation': {...},",
+    "        'instruction': '已暂存，尚未写入。向用户确认后调用 confirm_preference。'}",
+    "",
+    "async def confirm(self, state, operation_id):",
+    "    pending = _pop_pending(state, operation_id)   # 从 middle_context 取出",
+    "    try:",
+    "        return await self.add(state, pending.scope, pending.text, ...)",
+    "    except Exception:",
+    "        _restore_pending(state, index, raw)      # 写失败就留在队列里",
+    "        raise",
+    "",
+    "async def _add_long_term(self, clause, kind):",
+    "    vector = await self._embed(clause)    # 事务之外：失败则一行都不落",
+    "    record = await self._store.add(       # 一条 INSERT：text + vector 同一行",
+    "        buyer_id=..., text=clause, text_key=... ,",
+    "        max_count=200 if kind == 'preference' else None)",
+    "    return AddResult(p, similar=await self._similar_to(...))  # 失败不影响写入",
+  ]);
+
+  // ---------- schema ----------
+  $("schemacode").innerHTML = codelines([
+    "CREATE TABLE IF NOT EXISTS memories (",
+    "    id            TEXT PRIMARY KEY,     -- pref_ + 8 hex",
+    "    buyer_id      TEXT NOT NULL,        -- 身份边界",
+    "    kind          TEXT NOT NULL,        -- 'preference' / 'dislike'",
+    "    scope         TEXT NOT NULL,        -- 'long_term'",
+    "    text          TEXT NOT NULL,        -- 用户原话，逐字保留",
+    "    vector        BLOB NOT NULL,        -- float32 小端，dim × 4 字节",
+    "    vector_model  TEXT NOT NULL,        -- 换模型时可识别旧向量",
+    "    created_at    TEXT NOT NULL,",
+    "    updated_at    TEXT NOT NULL,",
+    "    text_key      TEXT,                 -- 语义键：跨会话去重（S8-3）",
+    "    version       INTEGER NOT NULL DEFAULT 1,   -- 旧版本写回 → 409（S8-4）",
+    "    material_tags TEXT NOT NULL DEFAULT '[]'    -- dislike 黑名单（S8-2/8）",
+    ");",
+    "CREATE INDEX idx_memories_buyer_kind ON memories(buyer_id, kind);",
+    "CREATE UNIQUE INDEX idx_memories_dedupe",
+    "    ON memories(buyer_id, kind, text_key);",
+  ]);
+
+  // ---------- 注入样例 ----------
+  $("injectsample").innerHTML = [
+    "<span class=\"k\">&lt;system-info&gt;</span>用户偏好（[本轮] 只影响这一轮，[本会话] 随会话保存，[长期] 跨会话保存。",
+    "作用域越窄越贴合当下；互相冲突时你自己权衡，必要时向用户确认）：",
+    "<span class=\"v\">[本轮]</span> pref_db879c4f 这次先看看 2000 以内的",
+    "<span class=\"v\">[本会话]</span> pref_9f8e7d6c 只考虑母婴宠物类目",
+    "<span class=\"v\">[长期]</span> pref_1a2b3c4d 预算 500 以内（v1）",
+    "<span class=\"v\">[长期·不喜欢]</span> pref_5e6f7a8b 不要塑料的杯子（材质：塑料）",
+    "<span class=\"k\">&lt;/system-info&gt;</span>",
+    "",
+    "<span class=\"k\">&lt;system-info&gt;</span>还有待确认的记忆操作（尚未写入）：",
+    "<span class=\"v\">[待确认]</span> op_3c4d5e6f scope=long_term 以后只看官方店",
+    "先向用户确认；同意后调用 confirm_preference，拒绝则 cancel_preference。",
+    "<span class=\"k\">&lt;/system-info&gt;</span>",
+  ].join("\n");
+
+  $("injectcode").innerHTML = codelines([
+    "# context_governance.py — on_model_call",
+    "messages = self._with_preferences(messages, agent)  # 先注入",
+    "tokens   = await model.count_tokens(messages, tools)  # 再计数",
+    "if tokens > int(model.context_size * gate_ratio):",
+    "    ...                                              # 闸门看见的是真实体积",
+  ]);
+
+  // ---------- 身份链 ----------
+  const CHAIN = [
+    ["ChatService.run_turn", "as"],
+    ["└─ SessionStore.get_or_create(buyer_id, shopping_session_id)", "as"],
+    ["   ├─ snapshot = repo.load(...) or AgentState()", "cm"],
+    ["   ├─ state.middle_context[\"harbor.identity\"] = {\"buyer_id\": ...}", "our"],
+    ["   └─ agent_factory(state)                       # 签名不变", "as"],
+    ["      └─ build_agent(runtime, state)", "as"],
+    ["         ├─ _buyer_id_from(state, explicit)       # 显式参数优先", "our"],
+    ["         └─ PreferenceMemory(buyer_id, store, embedder)", "our"],
+    ["            ├─ ContextGovernanceMiddleware(preferences=memory)", "cm"],
+    ["            ├─ make_product_search_tool(service, memory=memory)", "cm"],
+    ["            └─ Toolkit += add / confirm / cancel / update / delete", "cm"],
+  ];
+  $("chain").innerHTML = CHAIN.map(([t, k]) =>
+    `<span class="${k}">${esc(t)}</span>`).join("\n");
+
+  // ---------- 工具表 ----------
+  const TOOLS = [
+    ["add_preference", "记住一条偏好；turn 立即生效，session / long_term 先暂存", "pending: true", "ok"],
+    ["confirm_preference", "用户确认后把暂存操作真正写入；超上限 → limit_reached", "写入 / duplicate", "ok"],
+    ["cancel_preference", "用户拒绝后丢弃暂存操作，不写任何东西", "cancelled", "ok"],
+    ["update_preference", "按 id 改文本；带 expected_version 时旧版本 → 409", "id 不变，version + 1", "ok"],
+    ["delete_preference", "按 id 删除；长期删行；撤回 dislike 也走它", "返回被删记录", "ok"],
+    ["同作用域重复", "_preference_key 归一（含代词）后命中，唯一索引兜底", "duplicate: true", "info"],
+    ["长期 add 有相近项", "用刚算出的向量做一次 search_similar", "附 similar[]", "info"],
+    ["任意记忆失败", "ToolChunk(state=SUCCESS) + ok:false", "不判整轮失败", "warn"],
+  ];
+  $("tools").innerHTML =
+    `<div class="trow head"><span>工具 / 情况</span><span>行为</span><span>结果</span><span></span></div>` +
+    TOOLS.map(([a, b, c, k]) =>
+      `<div class="trow"><span class="bh">${esc(a)}</span><span class="sc">${esc(b)}</span>` +
+      `<span class="bh">${esc(c)}</span><span class="tstat ${k}">${k === "ok" ? "OK" : k === "warn" ? "SOFT" : "INFO"}</span></div>`).join("");
+
+  $("toolcode").innerHTML = codelines([
+    "# add_preference → 只暂存：给模型一个可确认的 operation id",
+    '{"ok": true, "pending": true,',
+    ' "operation": {"id": "op_3c4d5e6f", "scope": "long_term",',
+    '               "text": "以后只看官方店", "kind": "preference",',
+    '               "material_tags": []},',
+    ' "counts": {"turn": 0, "session": 1, "long_term": 3},',
+    ' "instruction": "已暂存，尚未写入。向用户确认后调用 confirm_preference。"}',
+    "",
+    "# confirm_preference → 真正落库，返回带 version 的记录",
+    '{"ok": true,',
+    ' "preference": {"id": "pref_bb033c60", "scope": "long_term",',
+    '                "text": "以后只看官方店", "kind": "preference",',
+    '                "material_tags": [], "version": 1},',
+    ' "counts": {"turn": 0, "session": 1, "long_term": 4}}',
+    "",
+    "# update_preference 带着过期 version → 409，不覆盖",
+    '{"ok": false, "code": "version_conflict", "status": 409,',
+    ' "current": {"id": "pref_bb033c60", "text": "以后只看官方旗舰店", "version": 2}}',
+  ]);
+
+  // ---------- 失败语义 ----------
+  const FAILURES = [
+    ["text 为空 / 超长 / 疑问句", "_clean → PreferenceRejected", "—", "ok:false，不暂存也不写", "warn"],
+    ["同作用域重复", "_preference_key 命中，唯一索引兜底", "—", "duplicate:true，不调 embedding", "ok"],
+    ["未确认（ASK 未应答）", "操作留在 middle_context 队列", "—", "下一轮注入「还有待确认的记忆操作」", "info"],
+    ["embedding 失败", "confirm 时事务尚未开启", "—", "ok:false + retryable:true，操作留在队列", "warn"],
+    ["SQLite 写入失败", "rollback + MemoryStoreError", "—", "ok:false，操作留在队列，可重试", "warn"],
+    ["update 带着旧 version", "写锁内比对 record.version", "409", "ok:false + current，不覆盖新值", "bad"],
+    ["第 201 条长期偏好", "事务内 max_count=200", "—", "ok:false + code:limit_reached", "warn"],
+    ["update / delete 的 id 不存在", "store 返回 None", "—", "ok:false，error 偏好不存在", "warn"],
+    ["dislike 缺 material_tags", "工具入口校验", "—", "ok:false，不暂存", "warn"],
+    ["无 buyer 身份", "long_term_enabled = False", "—", "ok:false，retryable:false", "warn"],
+    ["旧模型的向量", "vector_model 不一致", "—", "list 正常；search_similar 跳过该行", "ok"],
+    ["相似检索失败", "_similar_to 捕获", "—", "similar 为空，写入仍然成功", "ok"],
+  ];
+  $("failures").innerHTML =
+    `<div class="trow head"><span>场景</span><span>代码行为</span><span>HTTP</span><span>结果</span></div>` +
+    FAILURES.map(([a, b, c, d, k]) =>
+      `<div class="trow"><span class="sc">${esc(a)}</span><span class="bh">${esc(b)}</span>` +
+      (c === "—" ? `<span class="bh">—</span>` : `<span class="tstat ${k}">${c}</span>`) +
+      `<span class="bh">${esc(d)}</span></div>`).join("");
+
+  // ---------- 测试 ----------
+  const TESTS = [
+    ["test_memory_vector.py", "pack / unpack 字节序、cosine 边界", "向量格式", "8"],
+    ["test_memory_store.py", "单行同写、跨会话去重、版本冲突、200 上限、dislike 豁免、旧库迁移", "存储层不变量", "25"],
+    ["test_preferences.py", "turn / session 生命周期、代词归一、快照往返、暂存 / 确认 / 取消", "三作用域语义", "26"],
+    ["test_preference_tools.py", "五工具状态码、两段式、409、limit_reached、embedding 失败", "模型侧契约", "17"],
+    ["test_context_governance.py", "S7 全量 + 三段注入、待确认块、dislike 标签、version、S7 回退", "注入路径", "49"],
+    ["test_s8_acceptance.py", "验收清单 S8-1..S8-8 逐条（工具面）", "验收映射", "10"],
+    ["test_factory.py", "governed 注册五件套、legacy 不注册、无身份关闭长期", "装配", "+3"],
+    ["test_chat_service.py", "SessionStore 注入 buyer 身份", "身份传递", "+1"],
+  ];
+  $("tests").innerHTML =
+    `<div class="trow head"><span>文件</span><span>覆盖</span><span>钉住什么</span><span>条数</span></div>` +
+    TESTS.map(([a, b, c, d]) =>
+      `<div class="trow"><span class="bh">${esc(a)}</span><span class="sc">${esc(b)}</span>` +
+      `<span class="bh">${esc(c)}</span><span class="tstat ok">${d}</span></div>`).join("");
+
+  // ---------- 重放 ----------
+  const TURN_TEXT = "这次先看看 2000 以内的";
+  const SESSION_TEXT = "只考虑母婴宠物类目";
+  const LONG_TEXT = "以后都只买 500 以内的";
+  const UPDATED_TEXT = "以后都只买 800 以内的";
+  const DISLIKE_TEXT = "不要塑料的杯子";
+
+  const TURN = { id: "pref_db879c4f", text: TURN_TEXT };
+  const SESSION = { id: "pref_9f8e7d6c", text: SESSION_TEXT };
+  const LONG = { id: "pref_bb033c60", text: LONG_TEXT, version: 1 };
+  const DISLIKE = {
+    id: "pref_5e6f7a8b", text: DISLIKE_TEXT, version: 1,
+    kind: "dislike", material_tags: ["塑料"],
+  };
+  const OP_SESSION = { id: "op_9f8e7d6c", text: SESSION_TEXT, scope: "session" };
+  const OP_LONG = { id: "op_bb033c60", text: LONG_TEXT, scope: "long_term" };
+  const OP_DISLIKE = { id: "op_5e6f7a8b", text: DISLIKE_TEXT, scope: "long_term" };
+
+  const STEPS = [
+    {
+      title: "会话 S1 · 第 1 轮之前",
+      note: "三段全空，待确认队列也空。SQLite 里还没有这个 buyer 的记录。",
+      turn: [], session: [], long: [], pending: [], injected: null, pendingInjected: null,
+    },
+    {
+      title: "用户：「这次先看看 2000 以内的」",
+      note: "模型判断这是<b>这一次</b>的约束 → <code>add_preference(scope=\"turn\")</code>。turn 不走确认，立即写入 <code>_turn</code>；不联网、不落盘。",
+      turn: [TURN], session: [], long: [], pending: [], injected: null, added: "turn",
+    },
+    {
+      title: "同轮的一次 model call",
+      note: "注入发生在计数之前。三段按 <b>本轮 → 本会话 → 长期</b> 渲染，只出现非空段。",
+      turn: [TURN], session: [], long: [], pending: [],
+      injected: ["[本轮] pref_db879c4f 这次先看看 2000 以内的"],
+    },
+    {
+      title: "第 2 轮 on_reply",
+      note: "<code>begin_turn()</code> 的第一件事是清空 turn——上一轮的「这次」不该影响这一轮。长期缓存同时从 SQLite 重载；待确认队列不动，它在 <code>middle_context</code> 里。",
+      turn: [], session: [], long: [], pending: [], injected: null, cleared: "turn",
+    },
+    {
+      title: "用户：「只考虑母婴宠物类目」",
+      note: "模型选了 <code>session</code> → <code>add_preference</code> 只<b>暂存</b>：队列里多一条 <code>op_…</code>，正式记录还没有写入。",
+      turn: [], session: [], long: [], pending: [OP_SESSION], injected: null, staged: "session",
+    },
+    {
+      title: "下一轮 model call · 待确认提示",
+      note: "待确认块每轮都会注入，直到用户回答。注意此时 <code>[本会话]</code> 段还是空的——<b>暂存不等于写入</b>。",
+      turn: [], session: [], long: [], pending: [OP_SESSION],
+      pendingInjected: ["op_9f8e7d6c scope=session 只考虑母婴宠物类目"],
+    },
+    {
+      title: "用户：「对，就按这个来」",
+      note: "模型调 <code>confirm_preference(op_9f8e7d6c)</code>：把操作从队列取出，写入 <code>state.middle_context[\"harbor.preferences\"]</code>。没有 embedding、没有 SQLite；它跟着 S6 快照持久化。",
+      turn: [], session: [SESSION], long: [], pending: [], injected: null, confirmed: "session",
+    },
+    {
+      title: "用户：「以后都只买 500 以内的」",
+      note: "「以后都」→ <code>long_term</code> → 暂存 <code>op_bb033c60</code>。此时还没有 embedding，SQLite 里也没有行。",
+      turn: [], session: [SESSION], long: [], pending: [OP_LONG], injected: null, staged: "long",
+    },
+    {
+      title: "用户：「嗯，记住」→ confirm",
+      note: "先 embed（事务之外），再 <code>BEGIN IMMEDIATE</code> 单条 INSERT：text 与 float32 BLOB 同一行，<code>version = 1</code>。embedding 失败时事务根本没开始。",
+      turn: [], session: [SESSION], long: [LONG], pending: [], injected: null, confirmed: "long",
+    },
+    {
+      title: "第 3 轮 · 三段同时注入",
+      note: "session 与 long_term 并存。作用域标签让模型知道哪条更「当下」——<b>不仲裁，冲突由模型自己权衡</b>，必要时它还能问用户。",
+      turn: [], session: [SESSION], long: [LONG], pending: [],
+      injected: [
+        "[本会话] pref_9f8e7d6c 只考虑母婴宠物类目",
+        "[长期] pref_bb033c60 以后都只买 500 以内的（v1）",
+      ],
+    },
+    {
+      title: "用户：「不要塑料的杯子」",
+      note: "这不是普通偏好：模型调 <code>add_preference(kind=\"dislike\", material_tags=[\"塑料\"])</code>。同样先暂存，材质标签一起进队列。",
+      turn: [], session: [SESSION], long: [LONG], pending: [OP_DISLIKE],
+      injected: null, staged: "dislike",
+    },
+    {
+      title: "用户：「对，塑料的都别推荐」→ confirm",
+      note: "写入一条 <code>kind=dislike</code> 的长期记录，<code>material_tags</code> 存成 JSON 数组。它不混在偏好列表里，而是单独的黑名单。",
+      turn: [], session: [SESSION], long: [DISLIKE, LONG], pending: [],
+      injected: null, confirmed: "dislike",
+    },
+    {
+      title: "用户：「以后不用避开塑料了」",
+      note: "模型找到那条 dislike（id 来自注入的 <code>[长期·不喜欢]</code> 行）并调 <code>delete_preference</code>。<code>blacklisted_material_tags</code> 立即变空，检索不再排除塑料。",
+      turn: [], session: [SESSION], long: [LONG], pending: [],
+      injected: null, deleted: "dislike",
+    },
+    {
+      title: "会话 S2 · 新 Agent，同一 buyer",
+      note: "换 <code>shopping_session_id</code> 后 state 是新的：turn、session、待确认队列都空。但 <code>begin_turn</code> 从 SQLite 重载长期记录——偏好仍在，dislike 已撤回。",
+      turn: [], session: [], long: [LONG], pending: [],
+      injected: ["[长期] pref_bb033c60 以后都只买 500 以内的（v1）"], newSession: true,
+    },
+    {
+      title: "update_preference(pref_bb033c60, 「以后都只买 800 以内的」, expected_version=1)",
+      note: "按 id 命中长期记录，只改 text；重新 embed 后 UPDATE <b>同一行</b>，<code>id</code> 与 <code>created_at</code> 不变，<code>version</code> 从 1 变 2。",
+      turn: [], session: [], long: [{ id: LONG.id, text: UPDATED_TEXT, version: 2 }], pending: [],
+      injected: ["[长期] pref_bb033c60 以后都只买 800 以内的（v2）"], updated: "long",
+    },
+    {
+      title: "另一个调用方仍拿着 version=1",
+      note: "写锁内比对：库里已是 v2，<code>expected_version=1</code> 过期 → <code>version_conflict / 409</code>，返回 <code>current</code>。新值不会被旧视图覆盖。",
+      turn: [], session: [], long: [{ id: LONG.id, text: UPDATED_TEXT, version: 2 }], pending: [],
+      injected: null, conflict: true,
+    },
+    {
+      title: "delete_preference(pref_bb033c60)",
+      note: "<code>DELETE ... WHERE id = ? AND buyer_id = ?</code>，返回被删除的记录。下一次 model call，长期段消失。",
+      turn: [], session: [], long: [], pending: [], injected: null, deleted: "long",
+    },
+  ];
+
+  let step = 0;
+
+  function prefRows(items, kind) {
+    if (!items.length) return `<div class="empty">— 空 —</div>`;
+    return items.map(item => {
+      const meta = [];
+      if (item.version) meta.push(`v${item.version}`);
+      if (item.material_tags && item.material_tags.length) {
+        meta.push(`材质：${item.material_tags.join("、")}`);
+      }
+      const tail = meta.length ? ` <span class="pid">${esc(meta.join(" · "))}</span>` : "";
+      return `<div class="jline ${kind === "long" ? "ok" : ""}">` +
+        `<span class="pid">${esc(item.id)}</span>${esc(item.text)}${tail}</div>`;
+    }).join("");
+  }
+
+  function pendingRows(items) {
+    if (!items.length) return "";
+    return `<div class="empty" style="margin-top:4px">pending · 尚未写入</div>` +
+      items.map(item =>
+        `<div class="jline new"><span class="pid">${esc(item.id)}</span>${esc(item.text)}</div>`
+      ).join("");
+  }
+
+  function injectBlock(lines) {
+    const body = ['<span class="k">&lt;system-info&gt;</span>用户偏好（…作用域越窄越贴合当下…）：']
+      .concat(lines.map(line => {
+        const at = line.indexOf("] ");
+        if (at === -1) return `<span class="v">${esc(line)}</span>`;
+        return `<span class="v">${esc(line.slice(0, at + 1))}</span> ` +
+          esc(line.slice(at + 2));
+      }))
+      .concat(['<span class="k">&lt;/system-info&gt;</span>']);
+    return `<div class="snapbox">${body.join("\n")}</div>`;
+  }
+
+  function pendingBlock(lines) {
+    const body = ['<span class="k">&lt;system-info&gt;</span>还有待确认的记忆操作（尚未写入）：']
+      .concat(lines.map(line => `<span class="v">[待确认]</span> ${esc(line)}`))
+      .concat([
+        "先向用户确认；同意后调用 confirm_preference，拒绝则 cancel_preference。",
+        '<span class="k">&lt;/system-info&gt;</span>',
+      ]);
+    return `<div class="snapbox bad">${body.join("\n")}</div>`;
+  }
+
+  function render() {
+    const s = STEPS[step];
+    $("stepno").textContent = `step ${step} / ${STEPS.length - 1}`;
+    $("narration").innerHTML = `<b>${esc(s.title)}</b> — ${s.note}`;
+    $("next").disabled = step >= STEPS.length - 1;
+
+    $("lane-turn").innerHTML = prefRows(s.turn, "turn");
+    $("lane-session").innerHTML =
+      prefRows(s.session, "session") + pendingRows(s.pending || []);
+
+    let longHtml = prefRows(s.long, "long");
+    if (s.long.length) {
+      const row = s.long[0];
+      let snap =
+        `<div class="snapbox"><span class="k">memories · row</span>\n` +
+        `<span class="k">id      </span> <span class="v">${esc(row.id)}</span>\n` +
+        `<span class="k">kind    </span> ${esc(row.kind || "preference")}` +
+        (row.version ? `  ·  version ${esc(row.version)}` : "") + `\n` +
+        `<span class="k">text    </span> ${esc(row.text)}\n`;
+      if (row.material_tags && row.material_tags.length) {
+        snap += `<span class="k">tags    </span> ${esc(row.material_tags.join("、"))}\n`;
+      }
+      snap +=
+        `<span class="k">vector  </span> BLOB · 512 × float32\n` +
+        `<span class="k">model   </span> qwen3.7-text-embedding-flash</div>`;
+      longHtml += snap;
+    }
+    if (s.deleted) {
+      const detail = s.deleted === "dislike" ? "· dislike 行已移除（黑名单变空）" : "· 行已移除";
+      longHtml += `<div class="jline bad">DELETE ${detail}</div>`;
+    }
+    if (s.conflict) longHtml += `<div class="jline bad">409 · 你的 version 过期了（当前 v2）</div>`;
+    $("lane-long").innerHTML = longHtml;
+
+    const parts = [];
+    if (s.injected) parts.push(injectBlock(s.injected));
+    if (s.pendingInjected) parts.push(pendingBlock(s.pendingInjected));
+    $("lane-inject").innerHTML = parts.length
+      ? parts.join("\n")
+      : `<div class="empty">（三段全空、无待确认：不注入）</div>`;
+  }
+
+  $("next").addEventListener("click", () => { if (step < STEPS.length - 1) { step++; render(); } });
+  $("reset").addEventListener("click", () => { step = 0; render(); });
+  render();
+</script>

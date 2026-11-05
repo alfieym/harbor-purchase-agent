@@ -26,12 +26,29 @@ SYSTEM_PROMPT = """\
 - 价格一律用命中里的 price_major + currency（工具已把最低价 SKU 换算成目标币种）。
   直接原样引用，不要自行再次换算、也不要改币种。
 - 只展示 hits 里的真实商品，不要编造不存在的商品。
-{archive_guidance}- 输出必须符合给定的结构化 schema（商品卡列表 + 一句话 summary）。
+{archive_guidance}{preference_guidance}\
+- 输出必须符合给定的结构化 schema（商品卡列表 + 一句话 summary）。
 """
 
 ARCHIVE_GUIDANCE = """\
 - 只声明你确实在本会话里推荐过的商品。上下文被压缩后，摘要里会出现 archive:// 指针；
   不确定之前推荐过什么时，先调用 read_archive(archive_id) 回查原文，不要凭记忆复述。
+"""
+
+# S8: the three preference scopes exist so the user's constraint survives the
+# right amount of time. The prompt teaches the mapping; the conflict policy
+# (narrower wins, the model weighs ties) is repeated in the injected block.
+PREFERENCE_GUIDANCE = """\
+- 用户给出值得记住的选购约束时，调用 add_preference 记住，text 逐字保留用户原话。
+  作用域：用户说「以后都/我一直」→ long_term；「这次/先」→ turn；其余 session。
+- session / long_term 是两段式：add_preference 只暂存，必须向用户确认；用户同意后
+  再调用 confirm_preference，拒绝就 cancel_preference。注入里出现
+  「还有待确认的记忆操作」时，先把它提出来问用户，不要假装已经记住。
+- 用户说不想要某种材质（「不要塑料」「避开玻璃」）→ kind=dislike 并给出 material_tags；
+  用户说「不用避开了」→ 用 delete_preference 删掉那条 dislike。
+- 注入的偏好每条都带 id 和 version（没有 id 的是本会话对话里抽出来的）。要改或删就用
+  update_preference / delete_preference，不要新增重复的一条；update 时把读到的 version
+  作为 expected_version 传回。作用域不能改，要换作用域先 delete 再 add。
 """
 
 # S7-2: the five summary fields the acceptance checklist names, in Chinese so
@@ -47,7 +64,12 @@ SUMMARY_TEMPLATE = (
 )
 
 
-def system_prompt_for(categories: Sequence[str], *, archive_enabled: bool = True) -> str:
+def system_prompt_for(
+    categories: Sequence[str],
+    *,
+    archive_enabled: bool = True,
+    preferences_enabled: bool = False,
+) -> str:
     """Append the catalog's real category vocabulary to the system prompt.
 
     Without it the model invents plausible categories (「家用电器」) that the
@@ -56,9 +78,14 @@ def system_prompt_for(categories: Sequence[str], *, archive_enabled: bool = True
 
     ``archive_enabled=False`` is the ``legacy`` strategy: no archive middleware,
     no ``read_archive`` tool, so the prompt must not mention either.
+    ``preferences_enabled`` is the S8 equivalent: no preference tools, no hint
+    that saving a preference is possible (``legacy`` is a pre-S7 baseline).
     """
     guidance = ARCHIVE_GUIDANCE if archive_enabled else ""
-    prompt = SYSTEM_PROMPT.replace("{archive_guidance}", guidance)
+    preference_guidance = PREFERENCE_GUIDANCE if preferences_enabled else ""
+    prompt = SYSTEM_PROMPT.replace("{archive_guidance}", guidance).replace(
+        "{preference_guidance}", preference_guidance
+    )
     vocabulary = sorted(set(categories))
     if not vocabulary:
         return prompt

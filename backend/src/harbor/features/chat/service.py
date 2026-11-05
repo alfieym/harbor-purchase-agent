@@ -20,6 +20,7 @@ from agentscope.state import AgentState
 
 from harbor.agents.cards import ProductCardList
 from harbor.agents.context_governance import ContextCapacityError, recorded_turn_count
+from harbor.agents.preferences import IDENTITY_STATE_KEY
 from harbor.features.chat.repository import SessionKey, SessionRepository, SnapshotWriteError
 from harbor.features.chat.schemas import CommerceIntentResponse
 
@@ -106,6 +107,12 @@ class SessionStore:
             state = None
             if self._repository is not None:
                 state = await asyncio.to_thread(self._repository.load, key)
+            if state is None:
+                state = AgentState()
+            # S8: the buyer id travels in the state, not in the factory signature
+            # (``agent_factory(state)``), so long-term memory can be scoped to the
+            # buyer without touching every existing factory.
+            state.middle_context[IDENTITY_STATE_KEY] = {"buyer_id": buyer_id}
             session = Session(
                 agent=self._agent_factory(state), lock=asyncio.Lock(), last_active=now
             )

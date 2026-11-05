@@ -1,15 +1,18 @@
 """S5: the shared factory assembles a runtime + per-session agent (no network)."""
 
 import asyncio
+import json
 from collections.abc import Sequence
 from pathlib import Path
 
 from agentscope.agent import Agent
+from agentscope.state import AgentState
 from qdrant_client import QdrantClient
 
 import harbor.agents.factory as factory
 from harbor.agents.context_governance import SessionArchiveOffloader
 from harbor.agents.factory import AgentRuntime, build_agent, build_runtime
+from harbor.agents.preferences import IDENTITY_STATE_KEY
 from harbor.core.config import Settings
 
 FIXTURE = Path(__file__).parent / "fixtures" / "catalog-vacuum-demo.jsonl"
@@ -65,7 +68,15 @@ def test_build_agent_wires_s7_governance(monkeypatch, tmp_path) -> None:
     agent = build_agent(runtime)
 
     names = {tool.name for tool in agent.toolkit.tool_groups[0].tools}
-    assert names == {"product_search", "read_archive"}
+    assert names == {
+        "product_search",
+        "read_archive",
+        "add_preference",
+        "confirm_preference",
+        "cancel_preference",
+        "update_preference",
+        "delete_preference",
+    }
     assert isinstance(agent.offloader, SessionArchiveOffloader)
     # Truncation would drop facts silently; S7 turns it off and rolls back instead.
     assert agent.context_config.compression_fallback_to_truncation is False
@@ -93,3 +104,69 @@ def test_build_agent_legacy_strategy_is_the_pre_s7_baseline(monkeypatch, tmp_pat
     assert agent.context_config.trigger_ratio == 0.8
     assert agent.context_config.compression_fallback_to_truncation is True
     assert "read_archive" not in asyncio.run(agent._get_system_prompt())
+
+
+# ---------------------------------------------------------------------------
+# S8: preference memory wiring
+# ---------------------------------------------------------------------------
+
+
+def _offline_runtime(monkeypatch, tmp_path, **settings_kwargs) -> AgentRuntime:
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="sk-test",
+        memory_db_path=tmp_path / "memory.sqlite3",
+        **settings_kwargs,
+    )
+    monkeypatch.setattr(factory, "OpenAIEmbedder", lambda _settings: FakeEmbedder())
+    monkeypatch.setattr(factory, "FastembedReranker", lambda _model: None)
+    monkeypatch.setattr(
+        factory, "_open_index", lambda *_args, **_kwargs: (QdrantClient(":memory:"), "fp-123")
+    )
+    monkeypatch.setattr(factory, "FINGERPRINT_PATH", tmp_path / "fingerprint.txt")
+    return build_runtime(settings, data_path=FIXTURE)
+
+
+def _tool_names(agent: Agent) -> set[str]:
+    return {tool.name for tool in agent.toolkit.tool_groups[0].tools}
+
+
+def _identity_state(buyer_id: str) -> AgentState:
+    state = AgentState()
+    state.middle_context[IDENTITY_STATE_KEY] = {"buyer_id": buyer_id}
+    return state
+
+
+def test_build_agent_governed_registers_preference_tools(monkeypatch, tmp_path) -> None:
+    runtime = _offline_runtime(monkeypatch, tmp_path)
+
+    agent = build_agent(runtime, state=_identity_state("b1"))
+
+    assert {"add_preference", "update_preference", "delete_preference"} <= _tool_names(agent)
+
+
+def test_build_agent_legacy_has_no_preference_tools(monkeypatch, tmp_path) -> None:
+    runtime = _offline_runtime(monkeypatch, tmp_path, context_strategy="legacy")
+
+    agent = build_agent(runtime, state=_identity_state("b1"))
+
+    assert _tool_names(agent) == {"product_search"}
+
+
+def test_build_agent_without_identity_skips_long_term_tools(monkeypatch, tmp_path) -> None:
+    runtime = _offline_runtime(monkeypatch, tmp_path)
+
+    agent = build_agent(runtime)  # no state, no buyer_id
+
+    tools = {tool.name: tool for tool in agent.toolkit.tool_groups[0].tools}
+    assert "add_preference" in tools  # turn/session scopes still work
+    chunk = asyncio.run(
+        tools["add_preference"].call(
+            _agent_state=agent.state, text="预算 500 以内", scope="long_term"
+        )
+    )
+    assert json.loads(chunk.content[0].text) == {
+        "ok": False,
+        "error": "长期记忆未启用",
+        "retryable": False,
+    }
