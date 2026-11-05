@@ -7,6 +7,7 @@ the ``SearchResult`` as a compact JSON chunk the model can read.
 
 import asyncio
 import json
+from dataclasses import dataclass
 from decimal import Decimal
 
 from agentscope.message import TextBlock, ToolResultState
@@ -74,14 +75,40 @@ def _search_result_to_dict(result: SearchResult, target_currency: str) -> dict:
     }
 
 
-def make_product_search_tool(service, memory=None) -> FunctionTool:
+@dataclass(frozen=True)
+class FixedSearchConstraints:
+    """Constraints the model cannot relax, pinned by whoever built the tool.
+
+    S9 sub-agents get their task's category/budget/currency/weight/exclusions
+    fixed here. A model argument only fills a field that is ``None`` — it can
+    ask for a smaller budget, never a larger one (S8-8's lesson at S9 scope).
+    """
+
+    category: str | None = None
+    price_max_major: float | None = None
+    currency: str = "CNY"
+    weight_max_kg: float | None = None
+    excluded_material_tags: tuple[str, ...] = ()
+
+
+def make_product_search_tool(
+    service,
+    memory=None,
+    *,
+    fixed_constraints: FixedSearchConstraints | None = None,
+    description: str | None = None,
+) -> FunctionTool:
     """Build the ``product_search`` tool backed by a ``CatalogSearchService``.
 
     ``memory`` (a ``PreferenceMemory``) makes the user's material dislikes a
     *hard* filter: they are merged into ``excluded_material_tags`` here, before
     the spec reaches the search service, so the exclusion holds even when the
     model forgets to pass them (S8-8).
+
+    ``fixed_constraints`` pins a subset of the constraints for one task; set
+    fields win over the model's arguments (S9).
     """
+    fixed = fixed_constraints or FixedSearchConstraints()
 
     async def product_search(
         query: str,
@@ -92,7 +119,16 @@ def make_product_search_tool(service, memory=None) -> FunctionTool:
         excluded_material_tags: list[str] | None = None,
         _agent_state: AgentState | None = None,
     ) -> ToolChunk:
-        excluded = list(excluded_material_tags or [])
+        if fixed_constraints is not None:
+            category = fixed.category if fixed.category is not None else category
+            if fixed.price_max_major is not None:
+                price_max_major = fixed.price_max_major
+            currency = fixed.currency
+            if fixed.weight_max_kg is not None:
+                weight_max_kg = fixed.weight_max_kg
+
+        excluded = list(fixed.excluded_material_tags)
+        excluded.extend(tag for tag in (excluded_material_tags or []) if tag not in excluded)
         if memory is not None and _agent_state is not None:
             # Union, not replace: a material the user asked to skip this turn and
             # one remembered from months ago are both exclusions.
@@ -125,7 +161,8 @@ def make_product_search_tool(service, memory=None) -> FunctionTool:
     return FunctionTool(
         product_search,
         name="product_search",
-        description=(
+        description=description
+        or (
             "在商品目录里检索满足条件的商品。query 是自然语言描述，其余是可选的硬约束"
             "（类目、预算、币种、重量、排除材质）。用户长期不喜欢的材质会自动加入排除，"
             "无需你重复填写。返回命中商品（含最低价 SKU）以及被硬约束过滤掉的商品与原因。"

@@ -6,13 +6,20 @@ import math
 import threading
 from collections.abc import Sequence
 from datetime import date
+from decimal import Decimal
 
 import jsonschema
 import pytest
+from agentscope.state import AgentState
 
 from harbor.agents.cards import ProductCard, ProductCardList
-from harbor.agents.tools import ProductSearchArgs, make_product_search_tool
+from harbor.agents.tools import (
+    FixedSearchConstraints,
+    ProductSearchArgs,
+    make_product_search_tool,
+)
 from harbor.features.catalog.models import Money, Product, ProductSearchSpec, Sku
+from harbor.features.catalog.search.schemas import SearchResult
 from harbor.features.catalog.search.service import CatalogSearchService
 
 
@@ -167,6 +174,65 @@ def test_tool_converts_price_to_target_currency() -> None:
     hit = payload["hits"][0]
     assert hit["currency"] == "CNY"
     assert math.isclose(hit["price_major"], 24.93 * 7.2, rel_tol=1e-9)
+
+
+class _RecordingService:
+    def __init__(self) -> None:
+        self.specs: list[ProductSearchSpec] = []
+
+    def search(self, query, spec, limit=10):
+        self.specs.append(spec)
+        return SearchResult(hits=[], total=0)
+
+
+class _FakeMemory:
+    def blacklisted_material_tags(self, _state):
+        return ("玻璃",)
+
+
+def test_fixed_constraints_override_model_arguments() -> None:
+    service = _RecordingService()
+    tool = make_product_search_tool(
+        service,
+        memory=_FakeMemory(),
+        fixed_constraints=FixedSearchConstraints(
+            category="母婴宠物",
+            price_max_major=500.0,
+            currency="CNY",
+            weight_max_kg=1.0,
+            excluded_material_tags=("塑料",),
+        ),
+    )
+
+    asyncio.run(
+        tool.call(
+            _agent_state=AgentState(),
+            query="饮水器",
+            category="家用电器",
+            price_max_major=9999.0,
+            currency="USD",
+            weight_max_kg=5.0,
+            excluded_material_tags=["金属"],
+        )
+    )
+
+    spec = service.specs[0]
+    assert spec.category == "母婴宠物"
+    assert spec.price_max_major == Decimal("500.0")
+    assert spec.currency == "CNY"
+    assert spec.weight_max_kg == 1.0
+    assert set(spec.excluded_material_tags) == {"塑料", "玻璃", "金属"}
+
+
+def test_unspecified_fixed_fields_fall_back_to_model_arguments() -> None:
+    service = _RecordingService()
+    tool = make_product_search_tool(
+        service, fixed_constraints=FixedSearchConstraints(currency="CNY")
+    )
+
+    asyncio.run(tool.call(_agent_state=AgentState(), query="杯子", category="家居生活"))
+
+    assert service.specs[0].category == "家居生活"
 
 
 def test_card_schema_roundtrip() -> None:
