@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -101,6 +101,27 @@ class Settings(BaseSettings):
     memory_db_path: Path = (
         Path(__file__).resolve().parents[4] / "data" / "sessions" / "memory.sqlite3"
     )
+
+    # S9: multi-agent dispatch. The batch budget must fit inside the parent
+    # turn, or a slow batch would turn the whole request into a 504 (S9-4).
+    dispatch_enabled: bool = True
+    dispatch_max_concurrency: int = Field(default=3, ge=1, le=8)
+    dispatch_task_timeout_seconds: float = Field(default=90.0, gt=0)
+    dispatch_batch_timeout_seconds: float = Field(default=75.0, gt=0)
+    dispatch_max_tasks: int = Field(default=6, ge=1, le=12)
+
+    @model_validator(mode="after")
+    def _dispatch_budget_fits_turn(self) -> "Settings":
+        # With dispatch off the budget is unused, so a turn-only test config
+        # needs no matching batch value.
+        if (
+            self.dispatch_enabled
+            and self.dispatch_batch_timeout_seconds >= self.turn_timeout_seconds
+        ):
+            raise ValueError(
+                "dispatch_batch_timeout_seconds must be less than turn_timeout_seconds"
+            )
+        return self
 
     @property
     def is_development(self) -> bool:

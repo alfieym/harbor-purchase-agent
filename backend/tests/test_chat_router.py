@@ -100,7 +100,10 @@ def _client(
     app.include_router(router, prefix="/commerce")
     app.state.chat_store = store
     app.state.session_repository = session_repository
-    app.state.settings = Settings(_env_file=None, turn_timeout_seconds=timeout_seconds)
+    # Turn-only config: dispatch is off, so no batch budget has to fit.
+    app.state.settings = Settings(
+        _env_file=None, turn_timeout_seconds=timeout_seconds, dispatch_enabled=False
+    )
     return TestClient(app)
 
 

@@ -16,7 +16,7 @@ from pathlib import Path
 from agentscope.agent import Agent, ContextConfig, ReActConfig
 from agentscope.model import ChatModelBase
 from agentscope.state import AgentState
-from agentscope.tool import Toolkit
+from agentscope.tool import ToolBase, Toolkit
 from qdrant_client import QdrantClient
 
 from harbor.agents.context_governance import (
@@ -24,8 +24,13 @@ from harbor.agents.context_governance import (
     SessionArchiveOffloader,
     make_read_archive_tool,
 )
+from harbor.agents.dispatch import (
+    AgentSubAgentRunner,
+    make_task_dispatch_tool,
+    read_dispatch_ledger,
+)
 from harbor.agents.models import build_chat_model
-from harbor.agents.permissions import allow_product_search_tool
+from harbor.agents.permissions import allow_dispatch_tool, allow_product_search_tool
 from harbor.agents.preferences import (
     IDENTITY_STATE_KEY,
     PreferenceMemory,
@@ -201,8 +206,16 @@ def build_agent(
     # compression and every model call with the S7 guarantees.
     governed = settings.context_strategy == "governed"
     buyer_id = _buyer_id_from(state, buyer_id)
+    # S9: dispatch is a governed-only capability; the ledger restores the last
+    # persisted plan so unfinished tasks are not silently forgotten.
+    dispatch_enabled = governed and settings.dispatch_enabled
+    ledger = read_dispatch_ledger(state) if dispatch_enabled else None
     prompt = system_prompt_for(
-        runtime.categories, archive_enabled=governed, preferences_enabled=governed
+        runtime.categories,
+        archive_enabled=governed,
+        preferences_enabled=governed,
+        dispatch_enabled=dispatch_enabled,
+        dispatch_ledger=ledger,
     )
     # S8: without a buyer id the turn/session scopes still work; the memory
     # simply reports ``long_term`` as unavailable instead of failing writes.
@@ -246,13 +259,33 @@ def build_agent(
             gate_ratio=settings.context_gate_ratio,
             preferences=memory,
         )
+        tools: list[ToolBase] = [
+            tool,
+            make_read_archive_tool(offloader),
+            *make_preference_tools(memory),
+        ]
+        if dispatch_enabled:
+            runner = AgentSubAgentRunner(
+                model=runtime.model,
+                service=runtime.service,
+                categories=runtime.categories,
+                memory=memory,
+            )
+            tools.append(
+                make_task_dispatch_tool(
+                    memory,
+                    runner,
+                    max_concurrency=settings.dispatch_max_concurrency,
+                    task_timeout_seconds=settings.dispatch_task_timeout_seconds,
+                    batch_timeout_seconds=settings.dispatch_batch_timeout_seconds,
+                    max_tasks=settings.dispatch_max_tasks,
+                )
+            )
         agent = Agent(
             name="purchase_agent",
             system_prompt=prompt,
             model=runtime.model,
-            toolkit=Toolkit(
-                [tool, make_read_archive_tool(offloader), *make_preference_tools(memory)]
-            ),
+            toolkit=Toolkit(tools),
             middlewares=[governance],
             state=state,
             offloader=offloader,
@@ -270,4 +303,6 @@ def build_agent(
         )
     # Without this the loop parks every tool call on a permission prompt.
     allow_product_search_tool(agent)
+    if dispatch_enabled:
+        allow_dispatch_tool(agent)
     return agent

@@ -702,7 +702,7 @@ def test_router_maps_capacity_error_to_507() -> None:
     app.include_router(router, prefix="/commerce")
     app.state.chat_store = SessionStore(agent_factory=lambda state=None: _CapacityAgent())
     app.state.session_repository = None
-    app.state.settings = Settings(_env_file=None, turn_timeout_seconds=10.0)
+    app.state.settings = Settings(_env_file=None, turn_timeout_seconds=10.0, dispatch_enabled=False)
 
     with TestClient(app) as client:
         resp = client.post(

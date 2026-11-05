@@ -70,6 +70,7 @@ def test_build_agent_wires_s7_governance(monkeypatch, tmp_path) -> None:
     names = {tool.name for tool in agent.toolkit.tool_groups[0].tools}
     assert names == {
         "product_search",
+        "task_dispatch",
         "read_archive",
         "add_preference",
         "confirm_preference",
@@ -170,3 +171,36 @@ def test_build_agent_without_identity_skips_long_term_tools(monkeypatch, tmp_pat
         "error": "长期记忆未启用",
         "retryable": False,
     }
+
+
+# ---------------------------------------------------------------------------
+# S9: dispatch wiring and restart recovery
+# ---------------------------------------------------------------------------
+
+
+def test_build_agent_can_turn_dispatch_off(monkeypatch, tmp_path) -> None:
+    runtime = _offline_runtime(monkeypatch, tmp_path, dispatch_enabled=False)
+
+    agent = build_agent(runtime)
+
+    assert "task_dispatch" not in _tool_names(agent)
+    assert "task_dispatch" not in asyncio.run(agent._get_system_prompt())
+
+
+def test_build_agent_restores_dispatch_plan_after_restart(monkeypatch, tmp_path) -> None:
+    from harbor.agents.dispatch import DISPATCH_STATE_KEY
+
+    runtime = _offline_runtime(monkeypatch, tmp_path)
+    state = _identity_state("b1")
+    state.middle_context[DISPATCH_STATE_KEY] = {
+        "revision": 2,
+        "batches": {"b2": {"t1": {"goal": "找饮水器", "status": "failed"}}},
+    }
+    restored = AgentState.model_validate(state.model_dump())
+
+    agent = build_agent(runtime, state=restored)
+
+    assert "task_dispatch" in _tool_names(agent)
+    assert "task_dispatch" in agent.state.permission_context.allow_rules
+    prompt = asyncio.run(agent._get_system_prompt())
+    assert "上次派发计划" in prompt and "找饮水器" in prompt

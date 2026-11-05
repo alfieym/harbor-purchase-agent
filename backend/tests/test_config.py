@@ -1,6 +1,7 @@
 from collections.abc import Callable
 
 import pytest
+from pydantic import ValidationError
 
 from harbor.core.config import Settings
 
@@ -71,3 +72,20 @@ def test_sessions_dir_defaults_to_absolute_repo_root(clean_env: Callable[..., Se
     s = clean_env()
     assert s.sessions_dir.is_absolute()
     assert s.sessions_dir.name == "sessions"
+
+
+def test_dispatch_defaults(clean_env: Callable[..., Settings]) -> None:
+    settings = clean_env()
+
+    assert settings.dispatch_enabled is True
+    assert settings.dispatch_max_concurrency == 3
+    assert settings.dispatch_task_timeout_seconds == 90.0
+    assert settings.dispatch_batch_timeout_seconds == 75.0
+    assert settings.dispatch_batch_timeout_seconds < settings.turn_timeout_seconds
+
+
+def test_dispatch_batch_budget_must_fit_inside_the_turn(
+    clean_env: Callable[..., Settings],
+) -> None:
+    with pytest.raises(ValidationError):
+        clean_env(dispatch_batch_timeout_seconds=130.0)
