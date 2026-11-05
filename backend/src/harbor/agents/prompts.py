@@ -1,6 +1,7 @@
 """System prompt for the purchase agent (S4)."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 SYSTEM_PROMPT = """\
 你是「Harbor 采购助手」，帮用户从商品目录里挑商品。
@@ -51,6 +52,58 @@ PREFERENCE_GUIDANCE = """\
   作为 expected_version 传回。作用域不能改，要换作用域先 delete 再 add。
 """
 
+# S9: the parent's dispatch discipline. The model decides when to delegate; the
+# code does not keyword-match. What the prompt must make unmissable is the cost
+# (context), the three conditions, and that receipts are not testimony.
+DISPATCH_GUIDANCE = """\
+## 什么时候派人去做
+你有 task_dispatch：一次调用可以派一批互不依赖的子任务，并发执行。
+只在下面这类场景考虑它：多目标比价、多品类并行寻货、大范围搜索。
+派活前必须同时满足三条：
+1. 可并行：任务之间没有先后依赖，拆开不改变结论。
+2. 需要上下文隔离：中间过程很长，留在主上下文会挤掉重要信息。
+3. 链路够深：子任务需要多轮检索、换词或筛选。
+任一不成立，就自己做——一次 product_search 能完成的，不要派。
+订单/「查单」能力尚未接入，不要派交易类任务。
+
+## 怎么把活说明白
+- goal 必须自包含：子 Agent 没有用户，也没有这段对话，它不知道「刚才那个」。
+- 预算、类目、币种、重量、排除材质、已知商品 id 用字段填，不要只写在 goal 里。
+- 一个任务只放一个目标；两个品类就派两个任务。
+- 不要在同一批里放有依赖关系的任务。
+
+## 怎么读回执
+- 只把 evidence_refs 里 verified=true 的记录当作事实。
+- summary 是子 Agent 的转述，不是证据；引用商品 id 前先看它是否在 verified_product_ids 里。
+- verified=false 的商品必须标「未核实」，或者干脆不提。
+- 某个任务 ok=false 时，自己决定重派、自己做或向用户说明缺口；不得假装成功。
+"""
+
+# S9: the child has no user and no history. Anything it needs must be in the
+# brief; anything it says comes back as claims, not facts.
+SUBAGENT_SYSTEM_PROMPT = (
+    """\
+你是 Harbor 采购助手的子任务执行者。
+
+你没有用户，也没有对话历史；你只有下面这一条任务说明。不要提问、不要等待确认、
+不要派活，也不要引用任务说明之外的信息。
+
+你只能调用 product_search。任务里的硬约束已经固定在工具层：即使你把参数传成别的值，
+也只会按固定约束检索。若在约束内找不到商品，如实报告缺口，不要自行放宽条件。
+
+完成后只输出一个 JSON 对象：
+"""
+    '{"summary": "一段结论，不超过 200 字", "claims": ['
+    '{"product_id": "...", "field": "price_major", "value": 89.0, '
+    '"statement": "最低价 SKU 89 元"}]}\n'
+    """\
+- claims 只写你从 product_search 返回结果里真实看到的商品；不要编造 product_id。
+- field 只能是 product_search 返回里的字段：price_major / title / brand / weight_kg /
+  selected_sku_id / score 之一。
+- 没有找到就返回 {"summary": "……", "claims": []}。
+"""
+)
+
 # S7-2: the five summary fields the acceptance checklist names, in Chinese so
 # the rendered summary is legible to the model and to a human reading a snapshot.
 SUMMARY_TEMPLATE = (
@@ -64,11 +117,55 @@ SUMMARY_TEMPLATE = (
 )
 
 
+def dispatch_ledger_prompt_block(ledger: Mapping[str, Any] | None) -> str:
+    """Summarise only the unfinished tasks from the previous dispatch plan.
+
+    A finished task needs no prompt space; an unfinished one must not be
+    silently forgotten across a restart (S9-7).
+    """
+    if not ledger:
+        return ""
+    lines: list[str] = []
+    for batch_key, tasks in (ledger.get("batches") or {}).items():
+        for task_id, entry in tasks.items():
+            status = entry.get("status")
+            if status == "ok":
+                continue
+            lines.append(f"- {batch_key}.{task_id} {status}：{entry.get('goal', '')}")
+    if not lines:
+        return ""
+    return (
+        "<system-info>上次派发计划（未完成或失败）：\n"
+        + "\n".join(lines)
+        + "\n重派、自己做，或向用户说明缺口；不要当作已完成。\n</system-info>"
+    )
+
+
+def subagent_system_prompt(
+    *,
+    brief_block: str,
+    categories: Sequence[str],
+    memory_block: str = "",
+) -> str:
+    """Assemble the sub-agent prompt: contract + brief + vocabulary + memory."""
+    parts = [SUBAGENT_SYSTEM_PROMPT, brief_block]
+    vocabulary = sorted(set(categories))
+    if vocabulary:
+        parts.append(
+            f"目录中的商品类目只有：{'、'.join(vocabulary)}。category 必须是其中之一，或省略。"
+        )
+    if memory_block:
+        parts.append(memory_block)
+    return "\n\n".join(parts)
+
+
 def system_prompt_for(
     categories: Sequence[str],
     *,
     archive_enabled: bool = True,
     preferences_enabled: bool = False,
+    dispatch_enabled: bool = False,
+    dispatch_ledger: Mapping[str, Any] | None = None,
 ) -> str:
     """Append the catalog's real category vocabulary to the system prompt.
 
@@ -80,16 +177,24 @@ def system_prompt_for(
     no ``read_archive`` tool, so the prompt must not mention either.
     ``preferences_enabled`` is the S8 equivalent: no preference tools, no hint
     that saving a preference is possible (``legacy`` is a pre-S7 baseline).
+    ``dispatch_enabled`` adds the S9 delegation discipline; the restore block
+    names unfinished tasks from the last persisted plan.
     """
     guidance = ARCHIVE_GUIDANCE if archive_enabled else ""
     preference_guidance = PREFERENCE_GUIDANCE if preferences_enabled else ""
-    prompt = SYSTEM_PROMPT.replace("{archive_guidance}", guidance).replace(
-        "{preference_guidance}", preference_guidance
-    )
+    parts = [
+        SYSTEM_PROMPT.replace("{archive_guidance}", guidance).replace(
+            "{preference_guidance}", preference_guidance
+        )
+    ]
     vocabulary = sorted(set(categories))
-    if not vocabulary:
-        return prompt
-    return (
-        f"{prompt}\n目录中的商品类目只有：{'、'.join(vocabulary)}。"
-        "category 必须是其中之一，或省略。"
-    )
+    if vocabulary:
+        parts.append(
+            f"\n目录中的商品类目只有：{'、'.join(vocabulary)}。category 必须是其中之一，或省略。"
+        )
+    if dispatch_enabled:
+        parts.append("\n" + DISPATCH_GUIDANCE)
+        ledger_block = dispatch_ledger_prompt_block(dispatch_ledger)
+        if ledger_block:
+            parts.append("\n" + ledger_block + "\n")
+    return "".join(parts)
