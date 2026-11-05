@@ -1,0 +1,452 @@
+<title>S9 多 Agent 编排</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  /* S9 flow — same paper-and-teal system as the S3/S4 pipeline pages. */
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C; --accent-soft: #E3F1EE;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --warn: #9A6700; --warn-soft: #FBF1DC;
+    --soft: #3353A6; --soft-soft: #EAF0FB;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --warn: #E0A63C; --warn-soft: #33270F;
+      --soft: #8FB0E8; --soft-soft: #182238;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --warn: #E0A63C; --warn-soft: #33270F;
+    --soft: #8FB0E8; --soft-soft: #182238;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(56px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header { margin-bottom: 18px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 78ch; }
+  .sub b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.accent { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+  .chip.soft { border-color: var(--soft); color: var(--soft); }
+
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 14px 16px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .flow-step { display: flex; flex-direction: column; align-items: center; min-width: 84px; padding: 2px 8px; }
+  .fidx { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); }
+  .fname { font-size: 14px; font-weight: 600; }
+  .fcount { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); text-align: center; }
+  .flow-link { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--faint); }
+  .farrow { font-size: 18px; line-height: 1; }
+  .fwhat { font-size: 11px; color: var(--muted); font-family: "IBM Plex Mono", monospace; max-width: 120px; text-align: center; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+
+  .mhead { margin: 34px 0 4px; font-size: 19px; font-weight: 700; text-wrap: balance; }
+  .msub { color: var(--muted); font-size: 13px; margin: 0 0 14px; max-width: 82ch; }
+  .msub b { color: var(--fg); }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  /* --- 三判据决策 --- */
+  .decide { display: grid; grid-template-columns: 1.05fr .95fr; gap: 14px; align-items: stretch; }
+  @media (max-width: 820px) { .decide { grid-template-columns: 1fr; } }
+  .criteria { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .crit { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; padding: 14px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .crit:last-child { border-bottom: 0; }
+  .crit input { margin: 3px 0 0; width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+  .crit input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .crit-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .crit-name { font-size: 14px; font-weight: 600; }
+  .crit-note { font-size: 12.5px; color: var(--muted); }
+  .verdict { display: flex; flex-direction: column; gap: 10px; justify-content: center; padding: 20px 22px; border: 1px solid var(--accent); border-radius: 12px; background: var(--accent-soft); }
+  .verdict.self { border-color: var(--warn); background: var(--warn-soft); }
+  .v-label { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .v-call { font-size: 21px; font-weight: 700; letter-spacing: -.01em; }
+  .v-call .mono { font-size: 18px; }
+  .v-why { font-size: 13px; color: var(--muted); margin: 0; }
+  .v-why b { color: var(--fg); }
+  .verdict.self .v-call { color: var(--warn); }
+  .verdict .v-call { color: var(--accent-ink); }
+
+  /* --- 泳道流程图 --- */
+  figure { margin: 0; }
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; height: auto; min-width: 720px; }
+  figcaption { font-size: 12.5px; color: var(--muted); margin-top: 8px; padding-left: 2px; max-width: 82ch; }
+  figcaption b { color: var(--fg); }
+  .lane-label { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--muted); letter-spacing: .04em; }
+  .lane-sub { font-size: 10px; fill: var(--faint); }
+  .box-title { font-size: 12.5px; font-weight: 600; fill: var(--fg); }
+  .box-sub { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--muted); }
+  .box-sub-accent { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--accent-ink); }
+  .edge-label { font-size: 10px; fill: var(--muted); }
+
+  /* --- 并发示意 --- */
+  .gantt { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px 8px; }
+  .grow { display: grid; grid-template-columns: 150px 1fr; gap: 12px; align-items: center; margin-bottom: 10px; }
+  @media (max-width: 640px) { .grow { grid-template-columns: 92px 1fr; } }
+  .glabel { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track { position: relative; height: 26px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+  .bar { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--bg); white-space: nowrap; }
+  .wait { position: absolute; top: 0; bottom: 0; border-radius: 6px 0 0 6px; background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 5px, var(--border) 5px, var(--border) 9px); display: flex; align-items: center; justify-content: center; font-size: 9.5px; color: var(--muted); }
+  .gaxis { display: grid; grid-template-columns: 150px 1fr; gap: 12px; }
+  .gaxis .ticks { display: flex; justify-content: space-between; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--faint); padding: 0 2px 12px; }
+  .glegend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); padding: 2px 0 12px 162px; }
+  @media (max-width: 640px) { .glegend { padding-left: 0; } }
+  .swatch { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+
+  .failgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
+  .failcard { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .failcard h3 { margin: 0; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .failcard p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .badge { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px dashed; letter-spacing: .03em; white-space: nowrap; }
+  .badge.ok { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .badge.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+
+  /* --- 核验表 --- */
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .trow { display: grid; grid-template-columns: 1.1fr 1fr 118px; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .trow:last-child { border-bottom: 0; }
+  .trow.head { background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .cell { font-family: "IBM Plex Mono", monospace; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+  .cell.plain { font-family: "IBM Plex Sans", sans-serif; font-size: 12.5px; color: var(--muted); }
+  .tstat { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; text-align: center; white-space: nowrap; }
+  .tstat.pass { color: var(--good); background: var(--good-soft); }
+  .tstat.fail { color: var(--bad); background: var(--bad-soft); }
+
+  .call { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; margin: 0; line-height: 1.6; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .panel h3 { margin: 0; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .panel p { margin: 0; font-size: 12.5px; color: var(--muted); }
+
+  .note { margin-top: 16px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { gap: 2px; padding: 12px 8px; }
+    .flow-step { min-width: 0; padding: 2px 4px; }
+    .farrow { font-size: 15px; }
+    .trow { grid-template-columns: 1fr; gap: 4px; }
+    .trow.head { display: none; }
+    .tstat { justify-self: start; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Purchase Agent · S9</p>
+    <h1>派发 → 并发 → 核验 → 回执</h1>
+    <p class="sub">S9 给主 Agent 加了一个工具：<span class="mono">task_dispatch</span>。它只在三件事同时成立时派人——<b>可并行</b>、<b>需要上下文隔离</b>、<b>链路够深</b>。子 Agent 没有用户、没有对话，只拿一份现裁的任务书；交回来的不是自述，是<b>结论加可核验的证据</b>。</p>
+    <div class="chips">
+      <span class="chip accent">task_dispatch</span>
+      <span class="chip">默认并发 3</span>
+      <span class="chip">子 Agent 只读</span>
+      <span class="chip soft">claims → verify_claims</span>
+      <span class="chip">账本保留 5 批</span>
+      <span class="chip good">S9-1 … S9-7 PASS</span>
+    </div>
+
+    <div class="flow" aria-label="S9 流程">
+      <div class="flow-step"><span class="fidx">①</span><span class="fname">请求</span><span class="fcount">一句话</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">三条判据</span></div>
+      <div class="flow-step"><span class="fidx">②</span><span class="fname">判据</span><span class="fcount">并行 · 隔离 · 够深</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">都成立才派</span></div>
+      <div class="flow-step"><span class="fidx">③</span><span class="fname">派发</span><span class="fcount">task_dispatch · 一批 ≤6</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">≤3 并发</span></div>
+      <div class="flow-step"><span class="fidx">④</span><span class="fname">子 Agent</span><span class="fcount">独立上下文 · 只读</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">claims + observed</span></div>
+      <div class="flow-step"><span class="fidx">⑤</span><span class="fname">核验</span><span class="fcount">verify_claims</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">只回传证据</span></div>
+      <div class="flow-step"><span class="fidx">⑥</span><span class="fname">回执</span><span class="fcount">summary · evidence · ids</span></div>
+    </div>
+    <p class="hint">先看下面的三判据：勾掉任意一条，主 Agent 就会自己做——一次 <span class="mono">product_search</span> 能完成的，不派。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2 class="mhead">什么时候该派人</h2>
+  <p class="msub">派发不是免费的：每个子 Agent 都是一次独立的 ReAct 回合。省下的是主上下文的噪声，付出的是 token 和延迟。三个勾全亮才值得。</p>
+
+  <div class="decide">
+    <div class="criteria">
+      <label class="crit">
+        <input type="checkbox" id="c1" checked>
+        <span class="crit-body">
+          <span class="crit-name">可并行</span>
+          <span class="crit-note">多个目标互不依赖，能同时开工；串行反而更慢。</span>
+        </span>
+      </label>
+      <label class="crit">
+        <input type="checkbox" id="c2" checked>
+        <span class="crit-body">
+          <span class="crit-name">需要上下文隔离</span>
+          <span class="crit-note">中间过程（十几次检索的原文）会污染主对话，只留结论更好。</span>
+        </span>
+      </label>
+      <label class="crit">
+        <input type="checkbox" id="c3" checked>
+        <span class="crit-body">
+          <span class="crit-name">链路够深</span>
+          <span class="crit-note">不止一次检索：要比价、要换关键词、要逐条排除。</span>
+        </span>
+      </label>
+    </div>
+    <div class="verdict" id="verdict" aria-live="polite">
+      <span class="v-label">主 Agent 的选择</span>
+      <span class="v-call" id="v-call">派发 · <span class="mono">task_dispatch</span></span>
+      <p class="v-why" id="v-why">三条都成立：拆成独立任务并发跑，中间过程留在子 Agent 那边，主上下文只收结论和证据。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">一次派发的数据流</h2>
+  <p class="msub">横轴是三个角色：主 Agent 决定做什么，调度层管并发与核验，子 Agent 只在一个全新上下文里干活。图中只画三判据全部成立的那条路。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 980 470" role="img" aria-label="S9 派发数据流：主 Agent 判断后调用 task_dispatch，调度层写账本、限并发，子 Agent 在独立上下文中调用 product_search，交回 claims 与 observed，verify_claims 核验后只把结论和证据回传给主 Agent。">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+          <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+          </marker>
+          <marker id="arr-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--soft)"/>
+          </marker>
+        </defs>
+
+        <!-- lanes -->
+        <rect x="0" y="30" width="980" height="140" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <rect x="0" y="200" width="980" height="90" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <rect x="0" y="320" width="980" height="120" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="52">主 Agent</text>
+        <text class="lane-sub" x="14" y="68">对话 · 回执</text>
+        <text class="lane-label" x="14" y="222">调度层</text>
+        <text class="lane-sub" x="14" y="238">dispatch 工具</text>
+        <text class="lane-label" x="14" y="342">子 Agent</text>
+        <text class="lane-sub" x="14" y="358">全新上下文</text>
+
+        <!-- lane 1 boxes -->
+        <rect x="100" y="80" width="180" height="64" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="116" y="106">① 三条判据</text>
+        <text class="box-sub" x="116" y="126">并行 · 隔离 · 够深</text>
+
+        <rect x="320" y="80" width="180" height="64" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="336" y="106">② task_dispatch</text>
+        <text class="box-sub" x="336" y="126">一批 ≤ 6 个任务</text>
+
+        <rect x="540" y="80" width="180" height="64" rx="10" fill="var(--surface)" stroke="var(--faint)" stroke-dasharray="5 4"/>
+        <text class="box-title" x="556" y="106">自己做</text>
+        <text class="box-sub" x="556" y="126">一次 product_search</text>
+
+        <rect x="760" y="80" width="180" height="64" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="776" y="106">⑥ 回执</text>
+        <text class="box-sub" x="776" y="126">summary + evidence_refs</text>
+
+        <!-- lane 2 boxes -->
+        <rect x="320" y="215" width="170" height="60" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="336" y="241">③ 批次账本</text>
+        <text class="box-sub" x="336" y="261">b{n} · revision 递增</text>
+
+        <rect x="550" y="215" width="170" height="60" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="566" y="241">④ 并发池</text>
+        <text class="box-sub" x="566" y="261">≤3 · 批预算 75s</text>
+
+        <rect x="760" y="215" width="180" height="60" rx="10" fill="var(--soft-soft)" stroke="var(--soft)"/>
+        <text class="box-title" x="776" y="241">verify_claims</text>
+        <text class="box-sub" x="776" y="261">逐条对照 observed</text>
+
+        <!-- lane 3 boxes -->
+        <rect x="320" y="345" width="400" height="70" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="336" y="371">⑤ 子 Agent · 全新 AgentState</text>
+        <text class="box-sub" x="336" y="390">没有对话历史，只拿到 TaskBrief</text>
+        <text class="box-sub-accent" x="336" y="406">product_search：预算 / 品类 / 排除项钉在工具层</text>
+
+        <rect x="760" y="345" width="180" height="70" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="776" y="371">claims + observed</text>
+        <text class="box-sub" x="776" y="390">自述 vs 工具真值</text>
+
+        <!-- edges -->
+        <path d="M190 80 L190 62 L630 62 L630 80" fill="none" stroke="var(--faint)" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+        <text class="edge-label" x="410" y="56" text-anchor="middle">任一不成立</text>
+
+        <line x1="280" y1="112" x2="318" y2="112" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <text class="edge-label" x="299" y="103" text-anchor="middle">都成立</text>
+
+        <line x1="410" y1="144" x2="410" y2="213" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="418" y="184">写 b{n}</text>
+
+        <line x1="490" y1="245" x2="548" y2="245" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="519" y="238" text-anchor="middle">每任务一槽</text>
+
+        <line x1="630" y1="275" x2="630" y2="343" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <text class="edge-label" x="638" y="313">TaskBrief</text>
+
+        <line x1="720" y1="380" x2="758" y2="380" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="739" y="372" text-anchor="middle">交差</text>
+
+        <line x1="850" y1="345" x2="850" y2="277" stroke="var(--soft)" marker-end="url(#arr-soft)"/>
+        <text class="edge-label" x="858" y="315">逐条对照</text>
+
+        <line x1="850" y1="215" x2="850" y2="146" stroke="var(--soft)" marker-end="url(#arr-soft)"/>
+        <text class="edge-label" x="858" y="184">只回传结论与证据</text>
+      </svg>
+    </div>
+    <figcaption><b>关键不对称：</b>子 Agent 的报告只是 claims；<span class="mono">verify_claims</span> 拿它和同一次运行里 <span class="mono">product_search</span> 真正返回的 observed 对照，核验才会发生。<b>中间过程（每次检索的原文）不回传</b>——这正是主上下文被省下的部分。</figcaption>
+  </figure>
+
+  <h2 class="mhead">并发、排队与超时</h2>
+  <p class="msub">一批任务同时起跑，默认最多 3 个在跑，其余排队。批次总预算 75 秒，必须小于一轮请求的 120 秒，否则慢批次会把整轮拖成 504（配置里用校验器挡住）。下图是 4 个任务的示意。</p>
+
+  <div class="gantt" aria-label="4 个任务、并发 3 的调度示意">
+    <div class="grow"><span class="glabel">t1 找饮水器</span><div class="track"><div class="bar" style="left:0;width:60%">1.8s</div></div></div>
+    <div class="grow"><span class="glabel">t2 找猫砂</span><div class="track"><div class="bar" style="left:0;width:80%">2.4s</div></div></div>
+    <div class="grow"><span class="glabel">t3 找猫抓板</span><div class="track"><div class="bar" style="left:0;width:40%">1.2s</div></div></div>
+    <div class="grow"><span class="glabel">t4 找猫碗</span><div class="track"><div class="wait" style="left:0;width:40%">排队</div><div class="bar" style="left:40%;width:60%">1.8s</div></div></div>
+    <div class="gaxis"><span></span><div class="ticks"><span>0s</span><span>1s</span><span>2s</span><span>3s</span></div></div>
+    <div class="glegend"><span><span class="swatch" style="background:var(--accent)"></span>执行中</span><span><span class="swatch" style="background:repeating-linear-gradient(45deg,var(--surface-2),var(--surface-2) 5px,var(--border) 5px,var(--border) 9px)"></span>等一个空槽</span><span>串行需 7.2s · 示意，非实测</span></div>
+  </div>
+
+  <div class="failgrid">
+    <div class="failcard">
+      <h3>子任务抛异常 <span class="badge ok">整批继续</span></h3>
+      <p>该任务返回 <span class="mono">ok=false · "子任务失败：…"</span>，其余任务照常完成。父 Agent 不会因为一个坏任务拿不到任何结果。</p>
+    </div>
+    <div class="failcard">
+      <h3>单任务超时 <span class="badge warn">90s</span></h3>
+      <p>该任务返回 <span class="mono">ok=false · "子任务超时"</span>；已经跑完的任务不受影响。</p>
+    </div>
+    <div class="failcard">
+      <h3>批次预算用完 <span class="badge warn">75s</span></h3>
+      <p>已完成的结果保留，未完成的任务各自返回 <span class="mono">"批次超时未完成"</span>。父回合一定拿得到一份回执。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">回执为什么可信</h2>
+  <p class="msub">子 Agent 可能记错、也可能编造。核验不用模型，用同一次运行里工具真正返回过的数据做对照。下面是离线脚本里的三条声称。</p>
+
+  <div class="tbl" role="table" aria-label="claims 与 observed 的核验结果">
+    <div class="trow head" role="row"><span>子 Agent 声称</span><span>工具实际返回</span><span>判定</span></div>
+    <div class="trow" role="row">
+      <span class="cell">P1 · price_major = 89</span>
+      <span class="cell">P1 · price_major = 89.0</span>
+      <span class="tstat pass">✓ verified</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">P404 · “很合适”</span>
+      <span class="cell plain">从未返回过这个 id</span>
+      <span class="tstat fail">✗ unverified</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">P1 · price_major = 99</span>
+      <span class="cell">P1 · price_major = 89.0</span>
+      <span class="tstat fail">✗ unverified</span>
+    </div>
+  </div>
+  <div class="note"><b>地图与点位。</b><span class="mono">evidence_refs</span> 是逐条声称的判定（点位）；<span class="mono">verified_product_ids</span> 是这次运行中工具真正返回过的 id 全集（地图），所以它可能比子 Agent 声称的更宽。父 Agent 只被允许引用地图里的 id；不在图里的，一律标“未核实”。</div>
+
+  <h2 class="mhead">重启之后，计划还在</h2>
+  <p class="msub">账本写进会话快照的 <span class="mono">middle_context["harbor.dispatch"]</span>，按 revision 递增，只保留最近 5 批。重启时 <span class="mono">build_agent</span> 恢复工具，并把失败 / 未完成的任务点名进系统 prompt。</p>
+
+  <div class="twocol">
+    <div class="panel">
+      <h3>两批并发时的一帧快照 <span class="badge ok">b1 · b2 都在</span></h3>
+      <pre class="call">middle_context["harbor.dispatch"] = {
+  "revision": 2,
+  "batches": {
+    "b1": {"t1": {"goal": "找饮水器",
+                  "status": "ok",
+                  "verified_product_ids": ["P1"]}},
+    "b2": {"t1": {"goal": "找猫砂",
+                  "status": "running"}}
+  }
+}</pre>
+      <p>revision 的认领与 running 条目的写入在同一个临界区里完成，两个并发调用不会抢到同一个批次号。</p>
+    </div>
+    <div class="panel">
+      <h3>重启后的系统 prompt <span class="badge ok">工具 + 计划</span></h3>
+      <pre class="call">&lt;system-info&gt;上次派发计划（未完成或失败）：
+- b2.t1 running：找猫砂
+重派、自己做，或向用户说明缺口；
+不要当作已完成。
+&lt;/system-info&gt;</pre>
+      <p><span class="mono">task_dispatch</span> 工具重新注册；计划块来自快照，不依赖模型记忆。status 为 <span class="mono">ok</span> 的批次不写进提示词。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">S9 七条验收</h2>
+  <p class="msub">离线脚本 7/7；真额度脚本（真实模型 + 假 embedding）8/8，含一次“简单请求不派活”的真实判断。</p>
+
+  <div class="tbl" role="table" aria-label="S9 验收清单">
+    <div class="trow head" role="row"><span>编号</span><span>验收项</span><span>结果</span></div>
+    <div class="trow" role="row"><span class="cell">S9-1</span><span class="cell plain">一批任务的并发耗时明显小于串行（0.40s vs 0.80s；真实模型 7.1s vs 9.1s）</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S9-2</span><span class="cell plain">父上下文只拿到 summary + evidence_refs + verified_product_ids，没有原始 hits</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S9-3</span><span class="cell plain">编造 id、错价格都标 verified=false，不进 verified_product_ids</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S9-4</span><span class="cell plain">一个子任务崩溃，整批仍然返回，另一个任务成功</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S9-5</span><span class="cell plain">简单请求（“帮我找保温杯”）不调用 task_dispatch</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S9-6</span><span class="cell plain">子 Agent 工具面只有 product_search；两个并发派发的 b1 / b2 都保留</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S9-7</span><span class="cell plain">AgentState 往返后工具与计划都恢复，失败任务被点名</span><span class="tstat pass">PASS</span></div>
+  </div>
+
+  <div class="note"><b>为什么不干脆“总是派”？</b>派发把一次对话拆成多个独立回合：主上下文变干净，但 token 和延迟都变多，而且子 Agent 看不到用户的语气和上下文。三判据就是这条成本线——任一条不成立，主 Agent 自己做，通常一次 <span class="mono">product_search</span> 就够了。</div>
+</main>
+
+<script>
+  (function () {
+    var boxes = [document.getElementById("c1"), document.getElementById("c2"), document.getElementById("c3")];
+    var verdict = document.getElementById("verdict");
+    var call = document.getElementById("v-call");
+    var why = document.getElementById("v-why");
+    var names = ["可并行", "需要上下文隔离", "链路够深"];
+
+    function render() {
+      var off = colorsOff();
+      if (off.length === 0) {
+        verdict.classList.remove("self");
+        call.innerHTML = '派发 · <span class="mono">task_dispatch</span>';
+        why.innerHTML = "三条都成立：拆成独立任务并发跑，中间过程留在子 Agent 那边，主上下文只收结论和证据。";
+      } else {
+        verdict.classList.add("self");
+        call.innerHTML = '自己做 · <span class="mono">product_search</span>';
+        why.innerHTML = "因为「<b>" + off[0] + "</b>」不成立。与其为一个回合付一次派发的成本，主 Agent 直接检索更快，上下文也够用。";
+      }
+    }
+    function colorsOff() {
+      var off = [];
+      for (var i = 0; i < boxes.length; i++) {
+        if (!boxes[i].checked) off.push(names[i]);
+      }
+      return off;
+    }
+    boxes.forEach(function (b) { b.addEventListener("change", render); });
+    render();
+  })();
+</script>

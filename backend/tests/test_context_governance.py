@@ -581,7 +581,13 @@ def _call(middleware, agent, messages=None):
             agent=agent,
             input_kwargs={
                 "current_model": agent.model,
-                "messages": messages or [UserMsg(name="user", content="hi")],
+                # Production always carries a system prompt; tests must too,
+                # because preferences ride on it rather than on the tail.
+                "messages": messages
+                or [
+                    SystemMsg(name="system", content="system prompt"),
+                    UserMsg(name="user", content="hi"),
+                ],
                 "tools": [],
                 "tool_choice": None,
             },
@@ -887,9 +893,13 @@ async def _seed_scopes(memory: PreferenceMemory, state: AgentState) -> None:
 
 def _injected_text(middleware, agent) -> str:
     _, calls = _call(middleware, agent)
-    injected = calls[0]["messages"][-1]
-    assert injected.role == "user"
-    return injected.get_text_content() or ""
+    messages = calls[0]["messages"]
+    system, last = messages[0], messages[-1]
+    assert system.role == "system"
+    # The user's own message must remain the *last* one: a preference block at
+    # the tail makes historical constraints look like the current request.
+    assert last.role == "user" and last.get_text_content() == "hi"
+    return system.get_text_content() or ""
 
 
 def test_injection_renders_three_scopes_in_order(tmp_path: Path) -> None:
@@ -941,6 +951,42 @@ def test_injection_falls_back_to_s7_when_no_memory(tmp_path: Path) -> None:
     assert "[本轮]" not in text
 
 
+def test_injection_keeps_the_current_user_message_last(tmp_path: Path) -> None:
+    agent = FakeAgent()
+    middleware = ContextGovernanceMiddleware(offloader=SessionArchiveOffloader(tmp_path))
+
+    _, calls = _call(
+        middleware,
+        agent,
+        [SystemMsg(name="system", content="system prompt"), UserMsg(name="user", content="你好")],
+    )
+    messages = calls[0]["messages"]
+
+    assert [message.role for message in messages] == ["system", "user"]
+    assert messages[-1].get_text_content() == "你好"
+
+
+def test_injection_does_not_add_a_message(tmp_path: Path) -> None:
+    agent = FakeAgent()
+    middleware = ContextGovernanceMiddleware(offloader=SessionArchiveOffloader(tmp_path))
+
+    _, calls = _call(middleware, agent)
+
+    assert len(calls[0]["messages"]) == 2
+
+
+def test_injection_prepends_a_system_message_when_none_exists(tmp_path: Path) -> None:
+    agent = FakeAgent()
+    middleware = ContextGovernanceMiddleware(offloader=SessionArchiveOffloader(tmp_path))
+
+    _, calls = _call(middleware, agent, [UserMsg(name="user", content="hi")])
+    messages = calls[0]["messages"]
+
+    assert messages[0].role == "system"
+    assert "预算 600" in (messages[0].get_text_content() or "")
+    assert messages[-1].get_text_content() == "hi"
+
+
 def test_injection_does_not_touch_state_context(tmp_path: Path) -> None:
     memory = _s8_memory(tmp_path)
     agent = FakeAgent()
@@ -977,11 +1023,18 @@ def test_begin_turn_clears_only_turn_scope(tmp_path: Path) -> None:
     assert [item.text for item in memory.long_term_items()] == ["预算 500 以内"]
 
 
-def test_injection_merges_explicit_session_records_with_the_heuristic(tmp_path: Path) -> None:
+def test_injection_lists_only_explicit_session_records(tmp_path: Path) -> None:
+    """A one-off query in the transcript is not a session preference.
+
+    ``preference_facts`` scans every historical user message for cue words, so
+    "300元以内保温杯" would otherwise be re-injected forever — and, because it
+    rides at the tail, read by the model as the current request.
+    """
     memory = _s8_memory(tmp_path)
     agent = FakeAgent()
     _run(memory.begin_turn(agent.state))
-    session = _run(memory.add(agent.state, "session", "预算 600"))
+    session = _run(memory.add(agent.state, "session", "只考虑母婴宠物类目"))
+    agent.state.context.append(UserMsg(name="user", content="300元以内保温杯，不要塑料"))
     middleware = ContextGovernanceMiddleware(
         offloader=SessionArchiveOffloader(tmp_path), preferences=memory
     )
@@ -989,9 +1042,24 @@ def test_injection_merges_explicit_session_records_with_the_heuristic(tmp_path: 
     text = _injected_text(middleware, agent)
     session_lines = [line for line in text.splitlines() if line.startswith("[本会话]")]
 
-    # FakeAgent's conversation also says "预算 600"; the explicit record wins
-    # (it has the id), so the restated heuristic must not add a second line.
-    assert session_lines == [f"[本会话] {session.preference.id} 预算 600"]
+    assert session_lines == [f"[本会话] {session.preference.id} 只考虑母婴宠物类目"]
+    assert "保温杯" not in text
+
+
+def test_injection_with_memory_does_not_fall_back_to_the_heuristic(tmp_path: Path) -> None:
+    """With S8 wired, an empty memory means "say nothing", not "mine the chat"."""
+    memory = _s8_memory(tmp_path)
+    agent = FakeAgent()  # its transcript says "预算 600"
+    _run(memory.begin_turn(agent.state))
+    middleware = ContextGovernanceMiddleware(
+        offloader=SessionArchiveOffloader(tmp_path), preferences=memory
+    )
+
+    _, calls = _call(middleware, agent)
+    messages = calls[0]["messages"]
+
+    assert len(messages) == 2
+    assert "预算 600" not in (messages[0].get_text_content() or "")
 
 
 def test_injection_names_the_operations_still_awaiting_confirmation(tmp_path: Path) -> None:

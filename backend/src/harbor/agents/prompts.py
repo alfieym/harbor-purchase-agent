@@ -27,6 +27,8 @@ SYSTEM_PROMPT = """\
 - 价格一律用命中里的 price_major + currency（工具已把最低价 SKU 换算成目标币种）。
   直接原样引用，不要自行再次换算、也不要改币种。
 - 只展示 hits 里的真实商品，不要编造不存在的商品。
+- summary 只描述本轮：本轮检索到什么就说什么。本轮没有新的检索结果时，不要复述上一轮
+  的商品、价格或卡片，也不要拿旧结果凑数；闲聊就简短回应并返回空 cards。
 {archive_guidance}{preference_guidance}\
 - 输出必须符合给定的结构化 schema（商品卡列表 + 一句话 summary）。
 """

@@ -37,7 +37,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentscope.agent import ContextConfig
-from agentscope.message import DataBlock, Msg, TextBlock, ToolCallBlock, ToolResultBlock, UserMsg
+from agentscope.message import (
+    DataBlock,
+    Msg,
+    SystemMsg,
+    TextBlock,
+    ToolCallBlock,
+    ToolResultBlock,
+)
 from agentscope.middleware import MiddlewareBase
 from agentscope.permission import PermissionBehavior, PermissionDecision
 from agentscope.tool import FunctionTool, ToolChunk
@@ -423,6 +430,30 @@ def _with_ids(items) -> list[tuple[str, str]]:
     return [(item.id, item.text) for item in items]
 
 
+def _with_system_block(messages: list[Msg], block: str) -> list[Msg]:
+    """Merge ``block`` into the leading system message (or add one).
+
+    Providers disagree about system messages in the middle of a conversation,
+    and ``DeepSeekMultiAgentFormatter`` only honours ``msgs[0]`` as system, so
+    the block joins the first system message instead of becoming its own. An
+    empty ``block`` leaves the messages untouched — saying nothing is the
+    correct output when nothing has been remembered.
+    """
+    if not block:
+        return messages
+    index = next((i for i, message in enumerate(messages) if message.role == "system"), None)
+    if index is None:
+        return [SystemMsg(name="system", content=block), *messages]
+    original = messages[index]
+    existing = original.get_text_content() or ""
+    merged = f"{existing}\n\n{block}" if existing else block
+    return [
+        *messages[:index],
+        SystemMsg(name=original.name, content=merged),
+        *messages[index + 1 :],
+    ]
+
+
 def _appendix_text(summary: str | list[TextBlock | DataBlock]) -> str:
     """The machine-generated appendix from an earlier compression, if any."""
     text = _summary_text(summary)
@@ -696,23 +727,25 @@ class ContextGovernanceMiddleware(MiddlewareBase):
         )
 
     def _with_preferences(self, messages: list[Msg], agent) -> list[Msg]:
-        """Inject verbatim session constraints as a trailing UserMsg.
+        """Inject the session's constraints into the leading system message.
 
-        Preferences never enter the system prompt or the persisted context:
-        the system prompt keeps a stable prefix for provider-side caching, and
-        the injected message is rebuilt for each model call.
+        The block must never be appended as a trailing user message: whatever
+        sits last is what the model reads as the *current* request, so a
+        preference from three turns ago would silently replace "你好". It is
+        merged into the system message instead, which every provider and
+        formatter treats as standing instructions.
 
         With S8 memory wired, the three scopes are rendered side by side (with
-        their ids, so the model can update or delete them). The S7 heuristic
-        remains the fallback for sessions whose preferences only exist in the
-        transcript — a snapshot written before S8, or a store that is down.
+        their ids, so the model can update or delete them). The S7 heuristic —
+        scanning the transcript — is only a fallback for sessions with no
+        memory attached. It must never run alongside memory: it promotes
+        one-off queries ("300元以内保温杯") into permanent session constraints.
         """
         if self._preferences is not None:
             scoped = self._scoped_preference_block(agent.state)
             pending = self._pending_block(agent.state)
-            if scoped or pending:
-                content = "\n\n".join(part for part in (scoped, pending) if part)
-                return [*messages, UserMsg(name="user", content=content)]
+            content = "\n\n".join(part for part in (scoped, pending) if part)
+            return _with_system_block(messages, content)
         preferences = _normalize_preferences(
             preference_facts(agent.state.context) + preferences_from_appendix(agent.state.summary)
         )
@@ -725,31 +758,23 @@ class ContextGovernanceMiddleware(MiddlewareBase):
                 "</system-info>",
             ]
         )
-        return [*messages, UserMsg(name="user", content=body)]
+        return _with_system_block(messages, body)
 
     def _scoped_preference_block(self, state) -> str:
         """Render turn → session → long-term, skipping empty scopes.
 
         Each section is capped independently: a crowded long-term list must not
         crowd out the constraint the user stated this turn. Returns ``""`` when
-        all three scopes are empty, so the caller can fall back to S7.
+        all three scopes are empty; with memory attached, the caller injects
+        nothing (the S7 transcript heuristic stays out of this path).
         """
         assert self._preferences is not None
-        # Local import: ``preferences`` imports this module for the shared text
-        # helpers, so a module-level import here would be circular.
-        from harbor.agents.preferences import merged_session_items
-
-        heuristic = _normalize_preferences(
-            preference_facts(state.context) + preferences_from_appendix(state.summary)
-        )
+        # Explicit records only. The transcript heuristic is deliberately not
+        # merged in here: it cannot tell a standing constraint from a one-off
+        # query, and a false positive is re-injected on every turn.
         sections = (
             ("本轮", _with_ids(self._preferences.turn_items("preference"))),
-            (
-                "本会话",
-                merged_session_items(
-                    self._preferences.session_items(state, "preference"), heuristic
-                ),
-            ),
+            ("本会话", _with_ids(self._preferences.session_items(state, "preference"))),
             # Long-term lines carry the record's version: an update without it
             # cannot be checked for staleness (S8-4).
             (

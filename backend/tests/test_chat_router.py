@@ -3,7 +3,7 @@
 import asyncio
 import json
 
-from agentscope.message import ToolResultState
+from agentscope.message import Msg, TextBlock, ToolResultBlock, ToolResultState
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -51,23 +51,47 @@ class FakeAgent:
         text: str = "",
         tool_state: ToolResultState | None = None,
         delay: float = 0.0,
+        hits: list[dict] | None = None,
     ) -> None:
         self._output = output
         self._text = text
         self._tool_state = tool_state
         self._delay = delay
+        self._hits = hits
         self.state = _FakeState()
 
     async def reply(self, msg, structured_schema=None) -> FakeMsg:
         if self._delay:
             await asyncio.sleep(self._delay)
-        # Mirror AgentScope: a tool failure lands in the conversation context
-        # before the final answer, where run_turn detects it (S5-2).
+        # Mirror AgentScope: tool results land in the conversation context
+        # before the final answer, where run_turn reads them.
+        if self._hits is not None:
+            self.state.context.append(_search_message(self._hits))
         if self._tool_state is not None:
             self.state.context.append(FakeMsg(tool_state=self._tool_state))
         result = FakeMsg(self._output, self._text)
         self.state.context.append(result)
         return result
+
+
+_HIT = {"product_id": "X1", "title": "猫饮水器", "selected_sku_id": "X1-S1"}
+
+
+def _search_message(hits: list[dict]) -> Msg:
+    return Msg(
+        name="purchase_agent",
+        role="assistant",
+        content=[
+            ToolResultBlock(
+                id="call-1",
+                name="product_search",
+                output=[
+                    TextBlock(type="text", text=json.dumps({"hits": hits}, ensure_ascii=False))
+                ],
+                state=ToolResultState.SUCCESS,
+            )
+        ],
+    )
 
 
 def _cards_dict() -> dict:
@@ -119,7 +143,9 @@ class _FailingRepo:
 
 
 def test_intents_returns_final_text_and_cards() -> None:
-    store = SessionStore(agent_factory=lambda state=None: FakeAgent(output=_cards_dict()))
+    store = SessionStore(
+        agent_factory=lambda state=None: FakeAgent(output=_cards_dict(), hits=[_HIT])
+    )
     with _client(store) as client:
         resp = client.post(
             "/commerce/intents",

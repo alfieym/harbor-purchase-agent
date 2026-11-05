@@ -20,6 +20,7 @@ from agentscope.state import AgentState
 
 from harbor.agents.cards import ProductCardList
 from harbor.agents.context_governance import ContextCapacityError, recorded_turn_count
+from harbor.agents.grounding import ground_cards, tool_results_since
 from harbor.agents.preferences import IDENTITY_STATE_KEY
 from harbor.features.chat.repository import SessionKey, SessionRepository, SnapshotWriteError
 from harbor.features.chat.schemas import CommerceIntentResponse
@@ -244,18 +245,17 @@ async def run_turn(
                 # which only carries the final text answer. Detect any ERROR produced
                 # during this turn and fail loudly (S5-2) rather than trust whatever the
                 # model guessed after the failed search.
-                for msg in session.agent.state.context:
-                    for block in msg.get_content_blocks("tool_result"):
-                        block_id = getattr(block, "id", None)
-                        if block_id is not None and block_id in known_results:
-                            continue
-                        if block.state == ToolResultState.ERROR:
-                            raise ToolFailureError()
+                this_turn = tool_results_since(session.agent.state.context, known_results)
+                if any(block.state == ToolResultState.ERROR for block in this_turn):
+                    raise ToolFailureError()
                 structured = reply.structured_output
                 if structured is None:
                     raise NoStructuredOutputError(reply.get_text_content() or "")
                 cards = ProductCardList.model_validate(structured)
-                response = CommerceIntentResponse(final_text=cards.summary, cards=cards.cards)
+                # The model can copy cards from an earlier turn's structured
+                # output; only products this turn's tools returned are real.
+                grounded = ground_cards(cards.cards, this_turn)
+                response = CommerceIntentResponse(final_text=cards.summary, cards=grounded)
                 await store.persist(key, session.agent, raw_query, response)
                 return response
         except Exception:

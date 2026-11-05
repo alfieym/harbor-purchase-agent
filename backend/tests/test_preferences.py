@@ -9,11 +9,9 @@ from agentscope.state import AgentState
 
 from harbor.agents.preferences import (
     PREFERENCES_STATE_KEY,
-    Preference,
     PreferenceMemory,
     PreferenceRejected,
     PreferenceWriteError,
-    merged_session_items,
 )
 from harbor.features.memory.sqlite_store import SqliteMemoryStore
 
@@ -406,37 +404,6 @@ def test_long_term_update_works_for_an_id_outside_the_cache(tmp_path: Path) -> N
     updated = asyncio.run(memory.update(state, oldest_id, "改过的旧偏好"))
     assert updated is not None and updated.id == oldest_id
     assert memory.long_term_total() == 26
-
-
-# ---------------------------------------------------------------------------
-# session merge: explicit records + the S7 transcript heuristic
-# ---------------------------------------------------------------------------
-
-
-def _record(preference_id: str, text: str) -> Preference:
-    return Preference(id=preference_id, scope="session", text=text, created_at="", updated_at="")
-
-
-def test_merged_session_items_keeps_explicit_records() -> None:
-    merged = merged_session_items([_record("pref_1", "只考虑母婴宠物类目")], [])
-
-    assert merged == [("pref_1", "只考虑母婴宠物类目")]
-
-
-def test_merged_session_items_adds_heuristic_only_clauses() -> None:
-    merged = merged_session_items([], ["预算 600", "要轻一点"])
-
-    assert merged == [("", "预算 600"), ("", "要轻一点")]
-
-
-def test_merged_session_items_dedupes_a_restated_constraint_by_semantic_key() -> None:
-    merged = merged_session_items(
-        [_record("pref_1", "预算 600")],
-        ["第3轮：预算 600", "预算 800"],
-    )
-
-    # The explicit record wins: it is the one that can be updated by id.
-    assert merged == [("pref_1", "预算 600"), ("", "预算 800")]
 
 
 def test_a_restatement_that_drops_the_pronoun_is_the_same_long_term_preference(

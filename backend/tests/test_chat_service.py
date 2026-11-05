@@ -70,11 +70,13 @@ class FakeAgent:
         text: str = "",
         tool_state: ToolResultState | None = None,
         delay: float = 0.0,
+        hits: list[dict] | None = None,
     ) -> None:
         self._output = output
         self._text = text
         self._tool_state = tool_state
         self._delay = delay
+        self._hits = hits
         self.state = FakeState()
         self.replies = 0
 
@@ -82,6 +84,8 @@ class FakeAgent:
         self.replies += 1
         if self._delay:
             await asyncio.sleep(self._delay)
+        if self._hits is not None:
+            self.state.context.append(_search_message(self._hits, call_id=f"call-{self.replies}"))
         # Mirror AgentScope: a failed tool call lands as a tool_result block in
         # the conversation context *before* the final text answer, so run_turn's
         # context scan sees it even though the returned reply does not carry it.
@@ -123,6 +127,97 @@ class FakeClock:
 
     def advance(self, seconds: float) -> None:
         self.now += seconds
+
+
+def _search_message(hits: list[dict], *, call_id: str) -> Msg:
+    return Msg(
+        name="purchase_agent",
+        role="assistant",
+        content=[
+            ToolResultBlock(
+                id=call_id,
+                name="product_search",
+                output=[
+                    TextBlock(type="text", text=json.dumps({"hits": hits}, ensure_ascii=False))
+                ],
+                state=ToolResultState.SUCCESS,
+            )
+        ],
+    )
+
+
+class GroundedAgent:
+    """Stub that can append a tool result before returning its cards."""
+
+    def __init__(
+        self,
+        output: dict | None = None,
+        *,
+        hits: list[dict] | None = None,
+        history: list[Msg] | None = None,
+    ) -> None:
+        self.state = AgentState()
+        self.state.context.extend(history or [])
+        self._output = output
+        self._hits = hits
+
+    async def reply(self, msg, structured_schema=None) -> Msg:
+        self.state.context.append(msg)
+        if self._hits is not None:
+            self.state.context.append(_search_message(self._hits, call_id="call-this-turn"))
+        result = Msg(
+            name="purchase_agent",
+            role="assistant",
+            content=[TextBlock(type="text", text="命中 1 条")],
+            structured_output=self._output,
+        )
+        self.state.context.append(result)
+        return result
+
+
+_HIT = {"product_id": "X1", "title": "猫饮水器", "selected_sku_id": "X1-S1"}
+
+
+def test_run_turn_drops_cards_without_this_turn_evidence() -> None:
+    """A chit-chat turn must not reprint the previous turn's cards."""
+    agent = GroundedAgent(_cards_dict())
+
+    async def body():
+        return await run_turn(
+            SessionStore(agent_factory=lambda state=None: agent), "u1", "s1", "你好"
+        )
+
+    response = asyncio.run(body())
+
+    assert response.cards == []
+    assert response.final_text == "命中 1 条"
+
+
+def test_run_turn_keeps_a_card_backed_by_this_turns_search() -> None:
+    agent = GroundedAgent(_cards_dict(), hits=[_HIT])
+
+    async def body():
+        return await run_turn(
+            SessionStore(agent_factory=lambda state=None: agent), "u1", "s1", "给猫买饮水器"
+        )
+
+    response = asyncio.run(body())
+
+    assert [card.sku_id for card in response.cards] == ["X1-S1"]
+
+
+def test_run_turn_drops_a_card_backed_only_by_an_earlier_turn() -> None:
+    old = _search_message([_HIT], call_id="call-earlier-turn")
+    agent = GroundedAgent(_cards_dict(), history=[old])
+
+    async def body():
+        return await run_turn(
+            SessionStore(agent_factory=lambda state=None: agent), "u1", "s1", "你好"
+        )
+
+    response = asyncio.run(body())
+
+    assert response.cards == []
 
 
 def _cards_dict(summary: str = "命中 1 条") -> dict:
@@ -243,7 +338,7 @@ def test_run_turn_parses_structured_output_and_resumes_session() -> None:
     created: list[FakeAgent] = []
 
     def factory(state=None) -> FakeAgent:
-        agent = FakeAgent(output=_cards_dict("命中 1 条"))
+        agent = FakeAgent(output=_cards_dict("命中 1 条"), hits=[_HIT])
         created.append(agent)
         return agent
 

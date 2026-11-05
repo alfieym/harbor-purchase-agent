@@ -10,7 +10,8 @@ session ``state.middle_context`` (S6 snapshot)         the shopping session
 long    SQLite ``memories`` table, keyed by buyer      forever
 ======  ============================================  =========================
 
-Injection is still S7's job (a trailing ``UserMsg`` rebuilt per model call); this
+Injection is still S7's job (a block merged into the system message and rebuilt
+per model call, so the user's own message stays last); this
 module only owns the records and the tool-facing operations.
 
 Two record shapes share the table:
@@ -243,42 +244,6 @@ def _as_dict(preference: Preference) -> dict:
         "kind": preference.kind,
         "material_tags": list(preference.material_tags),
     }
-
-
-def merged_session_items(
-    explicit: list[Preference], heuristic: Iterable[str]
-) -> list[tuple[str, str]]:
-    """Merge stored session preferences with the S7 transcript heuristic.
-
-    Explicit records win: they carry the id the model needs to update or delete,
-    so a heuristic restatement of the same constraint must not shadow them. A
-    heuristic clause with no stored counterpart still belongs in the list — it
-    is how a session saved before S8 keeps its constraints.
-
-    Returns ``(id, text)`` pairs; heuristic-only entries have an empty id.
-    """
-    merged: list[tuple[str, str]] = []
-    seen: set[str] = set()
-
-    def key_for(clause: str) -> str:
-        # A clause reduced to nothing by the noise-stripping regex would make
-        # every such clause look identical; fall back to the raw text.
-        return _preference_key(clause) or clause
-
-    for record in explicit:
-        key = key_for(record.text)
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append((record.id, record.text))
-
-    for item in heuristic:
-        clause = " ".join(str(item).split())
-        if not clause or key_for(clause) in seen:
-            continue
-        seen.add(key_for(clause))
-        merged.append(("", clause))
-    return merged
 
 
 def _session_items(state: AgentState) -> list:

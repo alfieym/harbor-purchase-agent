@@ -27,3 +27,6 @@ backend/.env
 
 # Session snapshots + journal (runtime persistence, S6)
 data/sessions/
+
+# Local launcher logs (scripts/chat.sh)
+tmp/harbor-chat/

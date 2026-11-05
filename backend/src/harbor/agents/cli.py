@@ -24,6 +24,7 @@ from agentscope.message import UserMsg
 
 from harbor.agents.cards import ProductCardList
 from harbor.agents.factory import build_agent, build_runtime
+from harbor.agents.grounding import ground_cards, tool_results_since
 from harbor.core.config import get_settings
 
 
@@ -48,6 +49,14 @@ async def run_repl(agent: Agent) -> None:
             break
         if not text or text in {"/quit", "/exit"}:
             break
+        # Snapshot the tool results *before* the turn, so cards copied from an
+        # earlier answer cannot be presented as this turn's finds.
+        known_results = {
+            block.id
+            for message in agent.state.context
+            for block in message.get_content_blocks("tool_result")
+            if getattr(block, "id", None) is not None
+        }
         try:
             reply = await agent.reply(
                 UserMsg(name="user", content=text), structured_schema=ProductCardList
@@ -59,7 +68,9 @@ async def run_repl(agent: Agent) -> None:
         if structured is None:
             print(f"\n助手（文本）：{reply.get_text_content()}")
             continue
-        _print_cards(ProductCardList.model_validate(structured))
+        cards = ProductCardList.model_validate(structured)
+        grounded = ground_cards(cards.cards, tool_results_since(agent.state.context, known_results))
+        _print_cards(cards.model_copy(update={"cards": grounded}))
 
 
 def main(data_path: Path | None = None) -> None:

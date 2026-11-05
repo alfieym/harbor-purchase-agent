@@ -285,7 +285,7 @@ def test_s7_6_compression_keeps_system_prompt_and_tool_order(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_s7_7_preferences_injected_as_trailing_user_message() -> None:
+def test_s7_7_preferences_injected_without_displacing_the_current_turn() -> None:
     context = [UserMsg(name="user", content="预算 2000 以内，给猫找个饮水器")]
     agent = SimpleNamespace(
         state=SimpleNamespace(context=context, summary="", middle_context={}),
@@ -310,11 +310,14 @@ def test_s7_7_preferences_injected_as_trailing_user_message() -> None:
     )
 
     assert result == "ok"
-    injected = forwarded["messages"][-1]
-    assert injected.role == "user"
+    # The block rides the system message. Appending it as a trailing user
+    # message made the model read "预算 2000 以内" as the current request and
+    # answer a new "你好" with the old search.
+    injected = forwarded["messages"][0]
+    assert injected.role == "system"
     assert "预算 2000 以内" in (injected.get_text_content() or "")
     # Not appended to the persisted conversation.
     assert len(agent.state.context) == 1
-    # Preferences never touched the system prompt (there is none in this stub),
-    # and the original messages are still in place ahead of the injection.
-    assert forwarded["messages"][0].get_text_content() == "current turn"
+    # The user's own message stays last: it *is* the current request.
+    assert forwarded["messages"][-1].role == "user"
+    assert forwarded["messages"][-1].get_text_content() == "current turn"
