@@ -6,6 +6,8 @@ import time
 from datetime import date
 from types import SimpleNamespace
 
+from agentscope.message import TextBlock, ToolCallBlock
+from agentscope.model import ChatModelBase, ChatResponse
 from agentscope.state import AgentState
 
 from harbor.agents.dispatch import (
@@ -344,3 +346,89 @@ def test_runner_raises_when_structured_output_is_missing() -> None:
         assert "结构化输出" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
+
+
+class _FakeChatModel(ChatModelBase):
+    """The smallest model that drives a *real* Agent through ReAct.
+
+    First call: ask for ``product_search``. After the tool result comes back:
+    answer in text. Once the Agent asks for the required structured output,
+    call its built-in ``GenerateStructuredOutput`` tool with the hand-off JSON.
+    """
+
+    def __init__(self) -> None:
+        self.context_size = 4096
+        self.stream = False
+        self.max_retries = 0
+        self.retry_delay = 0.0
+        self.model = "fake-model"
+        self.formatter = SimpleNamespace(supported_input_media_types=[])
+        self.searched = False
+        self.offered: list[list[str]] = []
+        self.invoked: list[str] = []
+
+    async def _call_api(self, model_name, messages, tools=None, tool_choice=None, **kwargs):
+        offered = [tool["function"]["name"] for tool in (tools or [])]
+        self.offered.append(offered)
+        if "GenerateStructuredOutput" in offered and self.searched:
+            self.invoked.append("GenerateStructuredOutput")
+            return ChatResponse(
+                content=[
+                    ToolCallBlock(
+                        id="structured-1",
+                        name="GenerateStructuredOutput",
+                        input=json.dumps(
+                            {
+                                "summary": "找到不锈钢保温杯",
+                                "claims": [
+                                    {
+                                        "product_id": "P1",
+                                        "field": "price_major",
+                                        "value": 89.0,
+                                    }
+                                ],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                ],
+                is_last=True,
+            )
+        if not self.searched:
+            self.searched = True
+            self.invoked.append("product_search")
+            return ChatResponse(
+                content=[
+                    ToolCallBlock(
+                        id="search-1",
+                        name="product_search",
+                        input=json.dumps({"query": "保温杯"}, ensure_ascii=False),
+                    )
+                ],
+                is_last=True,
+            )
+        return ChatResponse(content=[TextBlock(text="找到 P1")], is_last=True)
+
+
+def test_runner_drives_a_real_agent_end_to_end() -> None:
+    """The fake-agent tests do not exercise AgentScope's real ReAct wiring.
+
+    This runs the actual ``_build_agent`` Agent: tool execution goes through
+    the real toolkit + permission engine, and the hand-off goes through
+    ``structured_schema=SubAgentOutput``.
+    """
+    model = _FakeChatModel()
+    runner = AgentSubAgentRunner(
+        model=model,
+        service=_HitService(),
+        categories=["家居生活"],
+    )
+
+    run = asyncio.run(runner.run(TaskBrief(task_id="t1", goal="找保温杯")))
+
+    assert run.output.summary == "找到不锈钢保温杯"
+    assert run.output.claims[0].product_id == "P1"
+    # The real product_search ran: its return is what the verdict rests on.
+    assert run.observed["P1"]["price_major"] == 89.0
+    # Every tool call the sub-agent made went through the real toolkit.
+    assert model.invoked == ["product_search", "GenerateStructuredOutput"]
