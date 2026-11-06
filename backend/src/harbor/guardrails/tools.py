@@ -68,7 +68,10 @@ class GuardedTool(ToolBase):
     async def check_permissions(self, *args: Any, **kwargs: Any):
         return await self._inner.check_permissions(*args, **kwargs)
 
-    async def __call__(self, *args: Any, **kwargs: Any) -> Any:
+    async def call(self, *args: Any, **kwargs: Any) -> Any:
+        # AgentScope's documented extension point: ``ToolBase.__call__`` is
+        # middleware plumbing and awaits ``call``, so guarding here covers both
+        # ``tool(...)`` (Toolkit) and ``tool.call(...)`` (direct callers).
         if args:
             raise TypeError("GuardedTool must be called with keyword arguments only")
         name = getattr(self, "name", "unknown")

@@ -27,6 +27,7 @@ from harbor.agents.tools import (
     _search_result_to_dict,
     make_product_search_tool,
 )
+from harbor.guardrails.tools import wrap_tools
 
 DISPATCH_STATE_KEY = "harbor.dispatch"
 _LEDGER_HISTORY = 5
@@ -458,12 +459,15 @@ class AgentSubAgentRunner:
         categories: Sequence[str],
         memory=None,
         agent_factory=None,
+        guard=None,
     ) -> None:
         self._model = model
         self._service = service
         self._categories = list(categories)
         self._memory = memory
         self._agent_factory = agent_factory or self._build_agent
+        # S11: shared budget/circuits, but each sub-agent gets its own session.
+        self._guard = guard
 
     async def run(self, brief: TaskBrief) -> SubAgentRun:
         observed: dict[str, dict[str, Any]] = {}
@@ -492,14 +496,29 @@ class AgentSubAgentRunner:
 
     def _build_agent(self, name: str, prompt: str, search_tool: FunctionTool) -> Agent:
         """A fresh agent: no history, no buyer identity, one read-only tool."""
-        return Agent(
+        guard_session = None
+        tools: list = [search_tool]
+        if self._guard is not None:
+            # S11-19: the sub-agent's loop window must not touch the parent's.
+            guard_session = self._guard.new_session()
+            tools = list(
+                wrap_tools(
+                    tools,
+                    session=guard_session,
+                    metrics=self._guard.metrics,
+                    max_chars=self._guard.tool_output_max_chars,
+                ),
+            )
+        agent = Agent(
             name=name,
             system_prompt=prompt,
             model=self._model,
-            toolkit=Toolkit([search_tool]),
+            toolkit=Toolkit(tools),
             state=AgentState(),
             react_config=ReActConfig(
                 max_iters=6,
                 interruption_raise_cancelled_error=True,
             ),
         )
+        agent.guard_session = guard_session
+        return agent

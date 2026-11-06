@@ -51,6 +51,9 @@ from harbor.features.catalog.search.rerank import FastembedReranker
 from harbor.features.catalog.search.service import CatalogSearchService
 from harbor.features.memory.sqlite_store import SqliteMemoryStore
 from harbor.features.orders.service import OrderService
+from harbor.guardrails.model import GuardedChatModel
+from harbor.guardrails.runtime import GuardRuntime
+from harbor.guardrails.tools import wrap_tools
 
 DEFAULT_DATA_PATH = Path(__file__).resolve().parents[4] / "data" / "catalog-v1.jsonl"
 INDEX_CACHE_DIR = Path(__file__).resolve().parents[4] / ".cache" / "catalog-index"
@@ -145,6 +148,9 @@ class AgentRuntime:
     # S8: preference writes embed through the same endpoint as search.
     embedder: Embedder
     memory_store: SqliteMemoryStore | None
+    # S11: ``None`` means the kill switch is off — no budget, no circuits, no
+    # tool wrapping, exactly the pre-S11 behaviour.
+    guard: GuardRuntime | None = None
 
 
 def build_runtime(settings: Settings, data_path: Path | None = None) -> AgentRuntime:
@@ -168,15 +174,28 @@ def build_runtime(settings: Settings, data_path: Path | None = None) -> AgentRun
         client=client,
     )
     model = build_chat_model(settings)
+    # S11: one GuardedChatModel covers the main agent, S9 sub-agents and S7
+    # summary calls, since all of them are handed this same object.
+    guard = GuardRuntime.from_settings(settings) if settings.guardrails_enabled else None
+    wrapped_model = model
+    if guard is not None:
+        wrapped_model = GuardedChatModel(
+            model,
+            guard,
+            request_timeout=settings.guard_request_timeout_seconds,
+            max_retries=settings.guard_max_retries,
+            backoff=settings.guard_retry_backoff_seconds,
+        )
     FINGERPRINT_PATH.write_text(fingerprint, encoding="utf-8")
     return AgentRuntime(
         settings=settings,
         products=products,
         service=service,
-        model=model,
+        model=wrapped_model,
         categories=sorted({product.category for product in products}),
         embedder=embedder,
         memory_store=SqliteMemoryStore(settings.memory_db_path),
+        guard=guard,
     )
 
 
@@ -219,6 +238,22 @@ def build_agent(
     # and AgentScope's own compression defaults. ``governed`` wraps every
     # compression and every model call with the S7 guarantees.
     governed = settings.context_strategy == "governed"
+    # S11: one guard session per agent — the loop window and sequence history
+    # belong to this conversation, not to the shared runtime.
+    guard_session = runtime.guard.new_session() if runtime.guard is not None else None
+
+    def guarded(items: list[ToolBase]) -> list[ToolBase]:
+        if runtime.guard is None or guard_session is None:
+            return items
+        return list(
+            wrap_tools(
+                items,
+                session=guard_session,
+                metrics=runtime.guard.metrics,
+                max_chars=settings.guard_tool_output_max_chars,
+            )
+        )
+
     buyer_id, shopping_session_id = _identity_from(state, buyer_id, shopping_session_id)
     if buyer_id is not None and shopping_session_id is not None:
         # Write the resolved pair back so the tools (which read state, not
@@ -272,7 +307,7 @@ def build_agent(
             name="purchase_agent",
             system_prompt=prompt,
             model=runtime.model,
-            toolkit=Toolkit([tool, *order_tools]),
+            toolkit=Toolkit(guarded([tool, *order_tools])),
             state=state,
             # ``interruption_raise_cancelled_error=True``: when ``run_turn``'s
             # ``asyncio.wait_for`` cancels a turn at the timeout budget,
@@ -307,6 +342,7 @@ def build_agent(
                 service=runtime.service,
                 categories=runtime.categories,
                 memory=memory,
+                guard=runtime.guard,
             )
             tools.append(
                 make_task_dispatch_tool(
@@ -322,7 +358,7 @@ def build_agent(
             name="purchase_agent",
             system_prompt=prompt,
             model=runtime.model,
-            toolkit=Toolkit(tools),
+            toolkit=Toolkit(guarded(tools)),
             middlewares=[governance],
             state=state,
             offloader=offloader,
@@ -344,4 +380,7 @@ def build_agent(
         allow_dispatch_tool(agent)
     if orders_enabled:
         allow_order_tools(agent)
+    # S11: ``run_turn`` reads this to reset the turn window and to short-circuit
+    # an exhausted budget before the agent is even called.
+    agent.guard_session = guard_session
     return agent

@@ -124,9 +124,14 @@ def _client(
     app.include_router(router, prefix="/commerce")
     app.state.chat_store = store
     app.state.session_repository = session_repository
-    # Turn-only config: dispatch is off, so no batch budget has to fit.
+    # Turn-only config: dispatch is off, so no batch budget has to fit. The
+    # guardrails are off too: this test drives a fake agent with a 0.01s turn
+    # budget, which the S11 guard timer (20s) could never fit inside.
     app.state.settings = Settings(
-        _env_file=None, turn_timeout_seconds=timeout_seconds, dispatch_enabled=False
+        _env_file=None,
+        turn_timeout_seconds=timeout_seconds,
+        dispatch_enabled=False,
+        guardrails_enabled=False,
     )
     return TestClient(app)
 

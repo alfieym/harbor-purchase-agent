@@ -708,7 +708,14 @@ def test_router_maps_capacity_error_to_507() -> None:
     app.include_router(router, prefix="/commerce")
     app.state.chat_store = SessionStore(agent_factory=lambda state=None: _CapacityAgent())
     app.state.session_repository = None
-    app.state.settings = Settings(_env_file=None, turn_timeout_seconds=10.0, dispatch_enabled=False)
+    # A short turn budget keeps this test fast; S11's guard timer (20s) would
+    # not fit inside it, so the guardrails are off for this fake-agent turn.
+    app.state.settings = Settings(
+        _env_file=None,
+        turn_timeout_seconds=10.0,
+        dispatch_enabled=False,
+        guardrails_enabled=False,
+    )
 
     with TestClient(app) as client:
         resp = client.post(
