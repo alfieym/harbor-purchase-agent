@@ -369,6 +369,14 @@ async def run_turn(
                     raise ToolFailureError()
                 structured = reply.structured_output
                 if structured is None:
+                    # S11 structural assertion: the reply carries no
+                    # ``ProductCardList``. Counted, then failed exactly as S5
+                    # did — a missing structured reply must stay a 502.
+                    if store.guard is not None:
+                        store.guard.metrics.incr("reply.assertion_failed")
+                        log_guard_event(
+                            "reply.assertion_failed", reason="no_structured_output"
+                        )
                     raise NoStructuredOutputError(reply.get_text_content() or "")
                 cards = ProductCardList.model_validate(structured)
                 # The model can copy cards from an earlier turn's structured

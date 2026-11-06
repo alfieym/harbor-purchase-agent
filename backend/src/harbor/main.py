@@ -12,6 +12,7 @@ from harbor.core.logging import setup_logging
 from harbor.features.chat.repository import SessionRepository
 from harbor.features.chat.router import router as commerce_router
 from harbor.features.chat.service import SessionStore
+from harbor.features.guardrails.router import router as guardrails_router
 from harbor.features.health.router import router as health_router
 from harbor.features.orders.evidence import SqliteEvidenceStore
 from harbor.features.orders.router import router as orders_router
@@ -93,5 +94,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # S10: the human gate. These routes live beside /commerce/intents so the
     # buyer's app can confirm the draft the chat turn just produced.
     app.include_router(orders_router, prefix="/commerce")
+    # S11: independent of ``llm_configured`` — with no runtime it reports
+    # ``enabled: false`` rather than 404, so ops can tell "off" from "missing".
+    app.include_router(guardrails_router, prefix=cfg.api_prefix)
 
     return app

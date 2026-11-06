@@ -32,6 +32,9 @@ class GuardRuntime:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> GuardRuntime:
+        # One metrics instance shared with the breaker, so circuit.open /
+        # circuit.close reach the status endpoint and the event stream.
+        metrics = GuardMetrics()
         return cls(
             budget=SqliteTokenBudget(
                 settings.guard_budget_db_path,
@@ -42,8 +45,9 @@ class GuardRuntime:
             circuits=CircuitBreaker(
                 settings.guard_circuit_failure_threshold,
                 settings.guard_circuit_cooldown_seconds,
+                metrics=metrics,
             ),
-            metrics=GuardMetrics(),
+            metrics=metrics,
             lite_model=settings.guard_lite_model,
             fallback_model=settings.guard_fallback_model,
             loop_window=settings.guard_loop_window,
