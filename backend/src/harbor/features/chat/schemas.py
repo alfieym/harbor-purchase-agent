@@ -11,6 +11,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from harbor.agents.cards import ProductCard
+from harbor.features.orders.schemas import OrderDraftView
 
 
 class CommerceIntentRequest(BaseModel):
@@ -22,6 +23,11 @@ class CommerceIntentRequest(BaseModel):
 class CommerceIntentResponse(BaseModel):
     final_text: str = Field(description="一句话结论（命中数量 / 拒绝原因）")
     cards: list[ProductCard] = Field(description="推荐的商品卡列表")
+    # S10: the human gate's input. Filled from the database after the turn, never
+    # from model text, so the buyer confirms exactly what was stored.
+    pending_draft: OrderDraftView | None = Field(
+        default=None, description="本会话待买家确认的订单草稿；没有则为 null"
+    )
 
 
 class SessionSummary(BaseModel):

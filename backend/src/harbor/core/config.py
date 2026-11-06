@@ -102,6 +102,15 @@ class Settings(BaseSettings):
         Path(__file__).resolve().parents[4] / "data" / "sessions" / "memory.sqlite3"
     )
 
+    # S10: transaction loop. The kill switch removes the order tools and the
+    # evidence recorder, so a misconfigured deployment degrades to S9 behaviour.
+    transaction_enabled: bool = True
+    # Orders and search evidence share one SQLite file, like S8's memory store.
+    orders_db_path: Path = (
+        Path(__file__).resolve().parents[4] / "data" / "sessions" / "orders.sqlite3"
+    )
+    evidence_retention_days: int = Field(default=30, ge=1)
+
     # S9: multi-agent dispatch. The batch budget must fit inside the parent
     # turn, or a slow batch would turn the whole request into a 504 (S9-4).
     dispatch_enabled: bool = True

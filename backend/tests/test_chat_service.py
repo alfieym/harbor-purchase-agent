@@ -474,7 +474,7 @@ def test_get_or_create_starts_a_fresh_state_when_no_snapshot(tmp_path) -> None:
     assert received[0].context == []
 
 
-def test_session_store_injects_buyer_identity_into_state() -> None:
+def test_session_store_injects_identity_into_state() -> None:
     received: list[AgentState | None] = []
 
     def factory(state: AgentState | None = None) -> FakeAgent:
@@ -485,7 +485,11 @@ def test_session_store_injects_buyer_identity_into_state() -> None:
     asyncio.run(store.get_or_create("u7", "s1"))
 
     assert received[0] is not None
-    assert received[0].middle_context["harbor.identity"] == {"buyer_id": "u7"}
+    # S10: the draft key is (buyer, session), so the order tools need both ids.
+    assert received[0].middle_context["harbor.identity"] == {
+        "buyer_id": "u7",
+        "shopping_session_id": "s1",
+    }
 
 
 def test_persist_writes_snapshot_and_journal(tmp_path) -> None:

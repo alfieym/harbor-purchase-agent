@@ -1,0 +1,710 @@
+<title>S10 交易闭环</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  /* S10 flow — same paper-and-teal system as the S3/S4/S9 pipeline pages. */
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C; --accent-soft: #E3F1EE;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --warn: #9A6700; --warn-soft: #FBF1DC;
+    --soft: #3353A6; --soft-soft: #EAF0FB;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --warn: #E0A63C; --warn-soft: #33270F;
+      --soft: #8FB0E8; --soft-soft: #182238;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --warn: #E0A63C; --warn-soft: #33270F;
+    --soft: #8FB0E8; --soft-soft: #182238;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(56px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header { margin-bottom: 18px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 78ch; }
+  .sub b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.accent { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+  .chip.soft { border-color: var(--soft); color: var(--soft); }
+  .chip.bad { border-color: var(--bad); color: var(--bad); }
+
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 14px 16px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .flow-step { display: flex; flex-direction: column; align-items: center; min-width: 96px; padding: 2px 8px; text-align: center; }
+  .fidx { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); }
+  .fname { font-size: 14px; font-weight: 600; }
+  .fcount { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); text-align: center; }
+  .flow-link { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--faint); }
+  .farrow { font-size: 18px; line-height: 1; }
+  .fwhat { font-size: 11px; color: var(--muted); font-family: "IBM Plex Mono", monospace; max-width: 130px; text-align: center; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+
+  .mhead { margin: 34px 0 4px; font-size: 19px; font-weight: 700; text-wrap: balance; }
+  .msub { color: var(--muted); font-size: 13px; margin: 0 0 14px; max-width: 82ch; }
+  .msub b { color: var(--fg); }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  /* --- 泳道流程图 --- */
+  figure { margin: 0; }
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; height: auto; min-width: 760px; }
+  figcaption { font-size: 12.5px; color: var(--muted); margin-top: 8px; padding-left: 2px; max-width: 82ch; }
+  figcaption b { color: var(--fg); }
+  .lane-label { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--muted); letter-spacing: .04em; }
+  .lane-sub { font-size: 10px; fill: var(--faint); }
+  .box-title { font-size: 12.5px; font-weight: 600; fill: var(--fg); }
+  .box-title.bad { fill: var(--bad); }
+  .box-sub { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--muted); }
+  .box-sub-accent { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--accent-ink); }
+  .edge-label { font-size: 10px; fill: var(--muted); }
+
+  /* --- 状态机 --- */
+  .machines { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .machine { display: grid; grid-template-columns: 112px 106px 1fr; gap: 14px; align-items: start; justify-items: start; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .machine-name { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .06em; color: var(--muted); padding-top: 7px; }
+  .branches { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .branch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .st { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); white-space: nowrap; }
+  .st.start { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+  .st.end { color: var(--muted); }
+  .st.stop { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }
+  .pa { font-size: 15px; line-height: 1; color: var(--faint); }
+  .pl { font-size: 11.5px; color: var(--muted); }
+
+  /* --- 表格 --- */
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .trow { display: grid; grid-template-columns: 1.1fr 1fr 118px; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .trow:last-child { border-bottom: 0; }
+  .trow.head { background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .cell { font-family: "IBM Plex Mono", monospace; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+  .cell.plain { font-family: "IBM Plex Sans", sans-serif; font-size: 12.5px; color: var(--muted); }
+  .cell.plain b { color: var(--fg); }
+  .tstat { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; text-align: center; white-space: nowrap; }
+  .tstat.pass { color: var(--good); background: var(--good-soft); }
+  .tstat.fail { color: var(--bad); background: var(--bad-soft); }
+  .tstat.no { color: var(--bad); background: var(--bad-soft); }
+  .tstat.yes { color: var(--good); background: var(--good-soft); }
+
+  .wtbl .trow { grid-template-columns: 1.3fr .8fr .9fr 1.2fr; }
+  .atbl .trow { grid-template-columns: .9fr .9fr 1.2fr 1.4fr; }
+  .wtbl .trow.head, .atbl .trow.head { align-items: center; }
+  .wtbl .tstat { justify-self: start; }
+
+  /* --- 通用面板 --- */
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .panel h3 { margin: 0; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .panel p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .panel p b { color: var(--fg); }
+
+  .failgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
+  .failcard { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .failcard h3 { margin: 0; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .failcard p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .badge { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px dashed; letter-spacing: .03em; white-space: nowrap; }
+  .badge.ok { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .badge.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .badge.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+
+  .call { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; margin: 0; line-height: 1.6; }
+
+  /* --- 手动走一遍 --- */
+  .sim { display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 820px) { .sim { grid-template-columns: 1fr; } }
+  .sim-actions { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 7px; }
+  .sim-actions h3 { margin: 0 0 2px; font-size: 13.5px; }
+  .sim-grp { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
+  .sim-btn { font-family: inherit; font-size: 12.5px; text-align: left; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--fg); cursor: pointer; }
+  .sim-btn:hover { border-color: var(--accent); }
+  .sim-btn.human { border-color: var(--accent); }
+  .sim-btn.ghost { border-style: dashed; color: var(--muted); }
+  .sim-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sim-k { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted); margin-left: 6px; }
+  .sim-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .sim-states { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sim-state { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; background: var(--surface-2); }
+  .sim-key { font-size: 11px; color: var(--muted); }
+  .sim-chip { font-family: "IBM Plex Mono", monospace; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+  .sim-chip.none { color: var(--faint); border-style: dashed; }
+  .sim-chip.pending { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .sim-chip.good { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .sim-chip.end { color: var(--muted); }
+  .sim-msg { font-size: 12.5px; color: var(--muted); margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); min-height: 38px; }
+  .sim-msg.ok { color: var(--fg); border-left: 3px solid var(--accent); }
+  .sim-msg.err { color: var(--bad); border-left: 3px solid var(--bad); background: var(--bad-soft); }
+  .sim-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+  .ev { display: flex; justify-content: space-between; gap: 10px; font-family: "IBM Plex Mono", monospace; font-size: 11px; padding: 4px 8px; border-radius: 6px; background: var(--surface-2); }
+  .ev.empty { color: var(--faint); justify-content: flex-start; }
+  .ev-meta { color: var(--muted); white-space: nowrap; }
+
+  .note { margin-top: 16px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { gap: 2px; padding: 12px 8px; }
+    .flow-step { min-width: 0; padding: 2px 4px; }
+    .farrow { font-size: 15px; }
+    .trow, .wtbl .trow, .atbl .trow { grid-template-columns: 1fr; gap: 4px; }
+    .trow.head { display: none; }
+    .tstat { justify-self: start; }
+    .machine { grid-template-columns: 1fr; gap: 8px; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Purchase Agent · S10</p>
+    <h1>提议 → 确认 → 下单 → 取消</h1>
+    <p class="sub">S10 把「推荐 → 下单 → 取消」接成一条可审计的闭环，安全边界只有一句：<b>模型只能提议，应用层才能提交</b>。模型能写草稿、能查订单，但 <span class="mono">orders</span> 表只有一条入边——买家在应用界面上点的那一下。</p>
+    <div class="chips">
+      <span class="chip accent">create_order_draft</span>
+      <span class="chip">get_order · 只读</span>
+      <span class="chip">人确认 = 唯一入边</span>
+      <span class="chip">SQLite WAL · BEGIN IMMEDIATE</span>
+      <span class="chip soft">证据保留 30 天</span>
+      <span class="chip good">485 passed</span>
+    </div>
+
+    <div class="flow" aria-label="S10 流程">
+      <div class="flow-step"><span class="fidx">①</span><span class="fname">检索</span><span class="fcount">product_search</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">命中落证据</span></div>
+      <div class="flow-step"><span class="fidx">②</span><span class="fname">草稿</span><span class="fcount">create_order_draft</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">只到应用层</span></div>
+      <div class="flow-step"><span class="fidx">③</span><span class="fname">人确认</span><span class="fcount">POST …/confirm</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">同一事务</span></div>
+      <div class="flow-step"><span class="fidx">④</span><span class="fname">订单</span><span class="fcount">created</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">应用层发起</span></div>
+      <div class="flow-step"><span class="fidx">⑤</span><span class="fname">取消</span><span class="fcount">request → confirm</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">终态</span></div>
+      <div class="flow-step"><span class="fidx">⑥</span><span class="fname">cancelled</span><span class="fcount">订单仍在，状态变了</span></div>
+    </div>
+    <p class="hint">先看下面的泳道图：模型的两条写入边都停在草稿表；到 <span class="mono">orders</span> 的那条线，起点在「应用层」这一行。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2 class="mhead">三条链，一条边界</h2>
+  <p class="msub">横轴是时间，纵轴是角色。<b>写链</b>由模型驱动，止于草稿；<b>决议链</b>由买家的 HTTP 动作驱动，是订单唯一的来源；<b>取消链</b>同样两步，中间态不动订单。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 520" role="img" aria-label="S10 交易闭环泳道图：模型行的 product_search 把命中写入 product_evidence，create_order_draft 在同一事务里顶掉旧草稿并写 order_drafts 与事件；模型行原来的确认位置是一个不存在的 confirm_order 工具。应用层行的买家确认草稿在同一事务里把草稿置 confirmed 并插入 orders；取消行先发起 pending 请求，确认后才把订单置 cancelled。所有事实写在 SQLite。">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+          <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+
+        <!-- lanes -->
+        <rect x="0" y="24" width="1000" height="126" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <rect x="0" y="166" width="1000" height="140" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <rect x="0" y="322" width="1000" height="180" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="48">模型</text>
+        <text class="lane-sub" x="14" y="62">工具面</text>
+        <text class="lane-label" x="14" y="190">应用层</text>
+        <text class="lane-sub" x="14" y="204">买家动作</text>
+        <text class="lane-label" x="14" y="346">SQLite</text>
+        <text class="lane-sub" x="14" y="360">唯一事实</text>
+
+        <!-- lane 1: model tools -->
+        <rect x="90" y="74" width="170" height="62" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="98">product_search</text>
+        <text class="box-sub" x="104" y="118">命中即写证据</text>
+
+        <rect x="320" y="74" width="170" height="62" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="334" y="98">create_order_draft</text>
+        <text class="box-sub" x="334" y="118">只建草稿 · 无 confirm</text>
+
+        <rect x="560" y="74" width="170" height="62" rx="10" fill="var(--surface)" stroke="var(--bad)" stroke-dasharray="5 4"/>
+        <text class="box-title bad" x="574" y="98">confirm_order ✕</text>
+        <text class="box-sub" x="574" y="118">模型没有这个工具</text>
+
+        <rect x="790" y="74" width="170" height="62" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="804" y="98">get_order</text>
+        <text class="box-sub" x="804" y="118">只读 · 查本人订单</text>
+
+        <!-- lane 2: application layer -->
+        <rect x="560" y="214" width="170" height="78" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="574" y="238">① 买家点确认</text>
+        <text class="box-sub" x="574" y="256">POST /drafts/{id}/</text>
+        <text class="box-sub" x="574" y="272">confirm · actor=buyer</text>
+
+        <rect x="790" y="214" width="170" height="78" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="804" y="238">② 取消（两步）</text>
+        <text class="box-sub" x="804" y="256">POST /orders/{id}/</text>
+        <text class="box-sub" x="804" y="272">cancellation[/confirm]</text>
+
+        <!-- lane 3: sqlite -->
+        <rect x="90" y="382" width="170" height="100" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="406">product_evidence</text>
+        <text class="box-sub" x="104" y="424">(buyer, session, sku)</text>
+        <text class="box-sub" x="104" y="442">同一 SKU 只留最新</text>
+        <text class="box-sub" x="104" y="460">保留 30 天</text>
+
+        <rect x="320" y="382" width="170" height="100" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="334" y="406">order_drafts</text>
+        <text class="box-sub" x="334" y="424">order_draft_items</text>
+        <text class="box-sub" x="334" y="442">status: pending</text>
+        <text class="box-sub" x="334" y="460">行项目价来自证据</text>
+
+        <rect x="560" y="382" width="170" height="100" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="574" y="406">orders</text>
+        <text class="box-sub" x="574" y="424">created → cancelled</text>
+        <text class="box-sub-accent" x="574" y="442">只由确认事务写入</text>
+        <text class="box-sub" x="574" y="460">draft_id UNIQUE</text>
+
+        <rect x="790" y="382" width="170" height="100" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="804" y="406">order_cancellation_</text>
+        <text class="box-title" x="804" y="424">requests</text>
+        <text class="box-sub" x="804" y="442">pending → confirmed</text>
+        <text class="box-sub" x="804" y="460">withdrawn · superseded</text>
+
+        <!-- edges: writes from the model -->
+        <line x1="175" y1="136" x2="175" y2="380" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <text class="edge-label" x="183" y="250">写快照</text>
+
+        <line x1="405" y1="136" x2="405" y2="380" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <text class="edge-label" x="397" y="176" text-anchor="end">同一事务</text>
+        <text class="edge-label" x="397" y="190" text-anchor="end">旧 pending → superseded</text>
+
+        <!-- edges: the human gate -->
+        <line x1="645" y1="292" x2="645" y2="380" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <text class="edge-label" x="653" y="330">同一事务 · 插订单</text>
+
+        <line x1="875" y1="292" x2="875" y2="380" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="883" y="330">发起 pending</text>
+
+        <!-- edges inside sqlite -->
+        <line x1="260" y1="432" x2="318" y2="432" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="289" y="424" text-anchor="middle">读价</text>
+
+        <line x1="490" y1="432" x2="558" y2="432" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="524" y="424" text-anchor="middle">draft_id</text>
+
+        <line x1="730" y1="432" x2="788" y2="432" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="759" y="424" text-anchor="middle">order_id</text>
+      </svg>
+    </div>
+    <figcaption><b>关键不对称：</b>模型的两条写入边都止于草稿；<span class="mono">orders</span> 只有一条入边，起点在「应用层」这一行的买家确认。中间那个虚线框不是漏画——<span class="mono">confirm_order</span> 这个工具<b>不存在</b>。<span class="mono">pending_draft</span> 也不是模型复述出来的：每轮结束后服务端按 <span class="mono">(buyer_id, shopping_session_id)</span> 从 <span class="mono">order_drafts</span> 重新查。</figcaption>
+  </figure>
+
+  <h2 class="mhead">三个状态机</h2>
+  <p class="msub">终态不能再确认。草稿的 <span class="mono">superseded</span> 不是买家动作，是「又建了一份新草稿」的副作用；取消请求的 <span class="mono">superseded</span> 同理。</p>
+
+  <div class="machines">
+    <div class="machine">
+      <span class="machine-name">草稿 draft</span>
+      <span class="st start">pending</span>
+      <span class="branches">
+        <span class="branch"><span class="pa">→</span><span class="st end">confirmed</span><span class="pl">应用层确认（同事务插单）</span></span>
+        <span class="branch"><span class="pa">→</span><span class="st end">cancelled</span><span class="pl">作废（无副作用，无需二次确认）</span></span>
+        <span class="branch"><span class="pa">→</span><span class="st stop">superseded</span><span class="pl">又建了一份新草稿</span></span>
+      </span>
+    </div>
+    <div class="machine">
+      <span class="machine-name">订单 order</span>
+      <span class="st start">created</span>
+      <span class="branches">
+        <span class="branch"><span class="pa">→</span><span class="st end">cancelled</span><span class="pl">取消请求被买家确认（没有别的入口）</span></span>
+      </span>
+    </div>
+    <div class="machine">
+      <span class="machine-name">取消 cancel</span>
+      <span class="st start">pending</span>
+      <span class="branches">
+        <span class="branch"><span class="pa">→</span><span class="st end">confirmed</span><span class="pl">买家确认（订单同事务置 cancelled）</span></span>
+        <span class="branch"><span class="pa">→</span><span class="st end">withdrawn</span><span class="pl">撤回（订单不动）</span></span>
+        <span class="branch"><span class="pa">→</span><span class="st stop">superseded</span><span class="pl">又发起了一条新请求</span></span>
+      </span>
+    </div>
+  </div>
+
+  <div class="tbl atbl" role="table" aria-label="应用层五个动作的前置、迁移、幂等与错误">
+    <div class="trow head" role="row"><span>应用层动作</span><span>前置</span><span>同一事务里的迁移</span><span>幂等 / 错误</span></div>
+    <div class="trow" role="row">
+      <span class="cell">confirm_draft</span>
+      <span class="cell plain">买家匹配；草稿 <b>pending</b></span>
+      <span class="cell plain">草稿 → confirmed；插 orders；写 2 条事件</span>
+      <span class="cell plain">已 confirmed 返回原订单（<span class="mono">idempotent=true</span>）；404 / 409</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">cancel_draft</span>
+      <span class="cell plain">买家匹配；草稿 <b>pending</b></span>
+      <span class="cell plain">草稿 → cancelled；写事件</span>
+      <span class="cell plain">已 cancelled 返回成功；404 / 409</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">request_cancellation</span>
+      <span class="cell plain">买家匹配；订单 <b>created</b></span>
+      <span class="cell plain">旧 pending → superseded；插新 pending</span>
+      <span class="cell plain">先查 (buyer, key)，命中即返回；404 / 409</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">confirm_cancellation</span>
+      <span class="cell plain">买家匹配；看<b>最新一条</b>请求</span>
+      <span class="cell plain">请求 → confirmed；订单 → cancelled；写 2 条事件</span>
+      <span class="cell plain">已完成后返回同一结果；404 / 409</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">withdraw_cancellation</span>
+      <span class="cell plain">买家匹配；看<b>最新一条</b>请求</span>
+      <span class="cell plain">请求 → withdrawn；<b>订单不动</b></span>
+      <span class="cell plain">已 withdrawn 返回成功；404 / 409（没有请求也是 409）</span>
+    </div>
+  </div>
+
+  <h2 class="mhead">谁在写哪张表</h2>
+  <p class="msub">这张表就是安全边界本身。防火墙不是 prompt 里的一句嘱咐，是「模型工具这一列，<span class="mono">orders</span> 是空的」。</p>
+
+  <div class="tbl wtbl" role="table" aria-label="六张表分别由谁写入">
+    <div class="trow head" role="row"><span>表</span><span>模型工具</span><span>应用层动作</span><span>约束 / 备注</span></div>
+    <div class="trow" role="row">
+      <span class="cell">product_evidence</span>
+      <span class="tstat yes">✓ 写</span>
+      <span class="tstat no">—</span>
+      <span class="cell plain">按 (buyer, session, sku) upsert，最近一次观测覆盖</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">order_drafts</span>
+      <span class="tstat yes">✓ 建草稿</span>
+      <span class="tstat yes">✓ 确认 / 作废</span>
+      <span class="cell plain"><span class="mono">ux_drafts_one_pending</span>：一会话一份 pending</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">order_draft_items</span>
+      <span class="tstat yes">✓ 写</span>
+      <span class="tstat no">—</span>
+      <span class="cell plain">单价由服务端从证据换算并量化，模型给的价格不采信</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">order_events</span>
+      <span class="tstat yes">✓ 草稿事件</span>
+      <span class="tstat yes">✓ 全部事件</span>
+      <span class="cell plain">只追加；<span class="mono">actor</span> + <span class="mono">source</span> 记录是谁做的</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell"><b>orders</b></span>
+      <span class="tstat no">✕ 无写路径</span>
+      <span class="tstat yes">✓ 仅 confirm_draft</span>
+      <span class="cell plain">这是 S10 唯一不可绕过的边界</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">order_cancellation_requests</span>
+      <span class="tstat no">✕ 无写路径</span>
+      <span class="tstat yes">✓ 发起 / 确认 / 撤回</span>
+      <span class="cell plain"><span class="mono">ux_cancel_one_pending</span>：每单一份 pending</span>
+    </div>
+  </div>
+
+  <h2 class="mhead">手动走一遍</h2>
+  <p class="msub">下面按真实的迁移规则演一遍：按钮对应真实的 HTTP 动作，状态芯片对应数据库里的 <span class="mono">status</span>，下方是同一事务里写出的事件。试着先确认再建草稿、或者确认取消后立刻再确认一次。</p>
+
+  <div class="sim">
+    <div class="sim-actions">
+      <h3>动作</h3>
+      <span class="sim-grp">模型 · 工具</span>
+      <button class="sim-btn" data-act="draft">建一份草稿 <span class="sim-k">create_order_draft</span></button>
+      <span class="sim-grp">应用层 · 买家</span>
+      <button class="sim-btn human" data-act="confirm">确认草稿 <span class="sim-k">POST …/confirm</span></button>
+      <button class="sim-btn human" data-act="cancel-draft">作废草稿 <span class="sim-k">POST …/cancel</span></button>
+      <button class="sim-btn human" data-act="request-cancel">发起取消请求 <span class="sim-k">POST …/cancellation</span></button>
+      <button class="sim-btn human" data-act="confirm-cancel">确认取消 <span class="sim-k">…/cancellation/confirm</span></button>
+      <button class="sim-btn human" data-act="withdraw-cancel">撤回取消请求 <span class="sim-k">…/cancellation/withdraw</span></button>
+      <span class="sim-grp">越权检查</span>
+      <button class="sim-btn ghost" data-act="other">用别的 buyer_id 确认 <span class="sim-k">b2</span></button>
+      <button class="sim-btn ghost" data-act="reset">重置</button>
+    </div>
+    <div class="sim-panel">
+      <div class="sim-states" aria-live="polite">
+        <div class="sim-state"><span class="sim-key">草稿</span><span id="st-draft"></span></div>
+        <div class="sim-state"><span class="sim-key">订单</span><span id="st-order"></span></div>
+        <div class="sim-state"><span class="sim-key">取消请求</span><span id="st-cancel"></span></div>
+      </div>
+      <p class="sim-msg" id="sim-msg"></p>
+      <ul class="sim-log" id="sim-log" aria-label="事件日志"></ul>
+    </div>
+  </div>
+
+  <h2 class="mhead">草稿的价格从哪来</h2>
+  <p class="msub">「就买刚才那个」可能发生在十轮之后，而 S7 的压缩已经把检索原文折叠了。所以价格不靠模型记，靠一张按会话隔离的证据表。</p>
+
+  <div class="twocol">
+    <div class="panel">
+      <h3>三级回退 <span class="badge ok">模型给的价格一律不采信</span></h3>
+      <pre class="call">1. product_evidence
+   PK (buyer_id, shopping_session_id, sku_id)
+   同一 SKU 只留最近一次观测
+
+2. 本会话上下文里的
+   成功 product_search 命中
+
+3. S7 压缩摘要附录
+   facts_from_appendix(...)
+   product_id 可以缺失</pre>
+      <p>命中 <b>先落表，再被读</b>：<span class="mono">product_search</span> 每次成功返回就 upsert，<span class="mono">create_order_draft</span> 优先按 <span class="mono">(buyer, session, sku)</span> 查表。</p>
+    </div>
+    <div class="panel">
+      <h3>换算与量化 <span class="badge warn">快照，不做价格变动校验</span></h3>
+      <pre class="call">line_subtotal = quantize(unit_price) × qty
+order_total   = Σ line_subtotal
+
+fx.convert(evidence_price → draft_currency)
+ROUND_HALF_UP · ISO-4217 小数位
+CNY/USD/EUR/SGD=2  JPY=0
+
+evidence_unit_price / evidence_currency
+= 换算前的那份原始证据</pre>
+      <p>草稿价是<b>下单时的快照</b>。确认时不再比价——这是买家明确划掉的范围；另一个会话的观测也读不到，证据按会话隔离。</p>
+    </div>
+  </div>
+  <div class="note"><b>保留期。</b>默认 30 天（<span class="mono">evidence_retention_days</span>）：启动时清理一次，之后每天第一次写入时惰性清理。上个月看到的价格，不是今天下单的证据。S9 子 Agent 没有买家身份，所以它的 <span class="mono">product_search</span> 不写这张表。</div>
+
+  <h2 class="mhead">失败落在哪</h2>
+  <p class="msub">交易失败不该毁掉整轮对话。参数错误、证据缺失是<b>模型可以纠正</b>的事，用 <span class="mono">ok=false</span> 回给它；只有存储故障才是 ERROR。</p>
+
+  <div class="failgrid">
+    <div class="failcard">
+      <h3>参数 / 证据不合法 <span class="badge ok">SUCCESS + ok=false</span></h3>
+      <p>空 items、数量 0、重复 SKU、没检索过的 SKU、类型写错——都返回机器可读的 <span class="mono">error</span>，模型看到原因继续对话，不触发整轮 502。</p>
+    </div>
+    <div class="failcard">
+      <h3>框架不校验 input_schema <span class="badge warn">工具体自己兜底</span></h3>
+      <p>AgentScope 的 <span class="mono">FunctionTool.call</span> 只广告 schema，不校验；<span class="mono">ValidationError</span> 逃出函数体就会变成 ERROR 工具块。所以参数归一化整段包在 try/except 里。</p>
+    </div>
+    <div class="failcard">
+      <h3>存储故障 <span class="badge bad">ERROR → 本轮 502</span></h3>
+      <p>这是唯一允许升级成 ERROR 的交易失败：数据库写不进去时，没有可纠正的语义，只能让本轮失败。</p>
+    </div>
+    <div class="failcard">
+      <h3>HTTP 映射 <span class="badge ok">404 / 409 / 503</span></h3>
+      <p>找不到（含非本人）→ 404；状态不允许 → 409 并带 <span class="mono">current_status</span>；订单服务未配置 → 503。不区分「不存在」和「不是你的」，避免泄露。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">S10 验收 15 条</h2>
+  <p class="msub">全部离线：假 embedding、<span class="mono">tmp_path</span> 下的真 SQLite，不调用任何远程 embedding。最后一次全量 <span class="mono">make test</span>：<b>485 passed</b>，ruff / mypy 干净。</p>
+
+  <div class="tbl" role="table" aria-label="S10 验收清单">
+    <div class="trow head" role="row"><span>编号</span><span>验收项</span><span>结果</span></div>
+    <div class="trow" role="row"><span class="cell">S10-1</span><span class="cell plain">建草稿后 <span class="mono">/commerce/intents</span> 返回 <span class="mono">pending_draft</span>，<span class="mono">orders</span> 仍为空</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-2</span><span class="cell plain">确认只产生一张订单、事件齐全；重复确认返回同一张</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-3</span><span class="cell plain">新草稿顶掉旧草稿；确认旧的返回 409</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-4</span><span class="cell plain">用别的 <span class="mono">buyer_id</span> 确认草稿返回 404</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-5</span><span class="cell plain">作废草稿不产生订单</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-6</span><span class="cell plain">发起取消后订单仍是 created；确认后订单与请求同事务迁移</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-7</span><span class="cell plain">撤回取消请求后订单仍是 created</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-8</span><span class="cell plain">未检索过的 SKU、数量 0、空 items → <span class="mono">ok=false</span>，整轮不 502</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-9</span><span class="cell plain">prompt 禁止声称「已下单」，并引导到应用层确认</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-10</span><span class="cell plain">相同行项目与币种重复建草稿 → 同一份，<span class="mono">replayed=true</span></span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-11</span><span class="cell plain">页面刷新后 <span class="mono">GET /orders/drafts</span> 取回草稿；无草稿返回 <span class="mono">null</span></span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-12</span><span class="cell plain">行小计之和严格等于总额；JPY 没有小数位</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-13</span><span class="cell plain">上下文里没有该 SKU 明细，证据表有快照仍能建草稿</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-14</span><span class="cell plain">保留期外的证据被清理，期内不受影响</span><span class="tstat pass">PASS</span></div>
+    <div class="trow" role="row"><span class="cell">S10-15</span><span class="cell plain">pytest 全绿；ruff / mypy 干净；测试不调用远程 embedding</span><span class="tstat pass">PASS</span></div>
+  </div>
+
+  <div class="note"><b>为什么不给模型一个 confirm 工具？</b>工具参数是模型控制的，按钮不是。把确认做成工具，安全边界就退化成「相信模型不调用它」；做成应用层接口，边界就是「模型手里根本没有这把钥匙」。<span class="mono">transaction_enabled=false</span> 时两个交易工具与证据记录器一起摘掉，行为退回 S9。</div>
+</main>
+
+<script>
+  (function () {
+    var state, events, msg, log;
+
+    var TONE = {
+      pending: "pending", confirmed: "good", created: "good",
+      cancelled: "end", superseded: "end", withdrawn: "end"
+    };
+
+    function chip(value) {
+      if (!value) return '<span class="sim-chip none">—</span>';
+      return '<span class="sim-chip ' + (TONE[value] || "end") + '">' + value + '</span>';
+    }
+
+    function say(kind, text) {
+      msg.className = "sim-msg" + (kind ? " " + kind : "");
+      msg.textContent = text;
+    }
+
+    function addEvent(name, actor, source) {
+      events.unshift({ name: name, actor: actor, source: source });
+      if (events.length > 9) events.pop();
+      renderLog();
+    }
+
+    function renderLog() {
+      if (!events.length) {
+        log.innerHTML = '<li class="ev empty">还没有事件</li>';
+        return;
+      }
+      log.innerHTML = events.map(function (e) {
+        return '<li class="ev"><span class="ev-name">' + e.name +
+          '</span><span class="ev-meta">' + e.actor + " · " + e.source + '</span></li>';
+      }).join("");
+    }
+
+    function render() {
+      document.getElementById("st-draft").innerHTML = chip(state.draft && state.draft.status);
+      document.getElementById("st-order").innerHTML = chip(state.order && state.order.status);
+      document.getElementById("st-cancel").innerHTML = chip(state.cancel && state.cancel.status);
+    }
+
+    function createDraft() {
+      if (state.draft && state.draft.status === "pending") {
+        state.draft.status = "superseded";
+        addEvent("draft_superseded", "model", "tool");
+      }
+      state.draft = { status: "pending" };
+      addEvent("draft_created", "model", "tool");
+      say("ok", "草稿已建，状态 pending。orders 表没有新增任何行——这一步永远创建不了订单。");
+      render();
+    }
+
+    function confirmDraft() {
+      if (!state.draft || state.draft.status !== "pending") {
+        say("err", "409 状态不允许：草稿当前是 " + (state.draft ? state.draft.status : "不存在") + "。");
+        return;
+      }
+      state.draft.status = "confirmed";
+      state.order = { status: "created" };
+      addEvent("draft_confirmed", "buyer", "app");
+      addEvent("order_created", "buyer", "app");
+      say("ok", "确认成功：草稿 → confirmed，订单 created。两条事件在同一个事务里写入。");
+      render();
+    }
+
+    function cancelDraft() {
+      if (!state.draft) { say("err", "404 未找到：还没有草稿。"); return; }
+      if (state.draft.status === "cancelled") {
+        say("ok", "幂等：草稿已经是 cancelled，返回同一结果。");
+        return;
+      }
+      if (state.draft.status !== "pending") {
+        say("err", "409 状态不允许：草稿当前是 " + state.draft.status + "。");
+        return;
+      }
+      state.draft.status = "cancelled";
+      addEvent("draft_cancelled", "buyer", "app");
+      say("ok", "草稿 → cancelled。没有订单产生，也没有二次确认——因为还没有副作用。");
+      render();
+    }
+
+    function requestCancel() {
+      if (!state.order) { say("err", "404 未找到：还没有订单。"); return; }
+      if (state.order.status === "cancelled") {
+        say("err", "409 状态不允许：订单已经是 cancelled。");
+        return;
+      }
+      if (state.cancel && state.cancel.status === "pending") {
+        state.cancel.status = "superseded";
+        addEvent("cancellation_superseded", "system", "app");
+      }
+      state.cancel = { status: "pending" };
+      addEvent("cancellation_requested", "buyer", "app");
+      say("ok", "取消请求 pending。订单状态不变，仍是 created——请求挂起不等于取消。");
+      render();
+    }
+
+    function confirmCancel() {
+      if (!state.order) { say("err", "404 未找到：还没有订单。"); return; }
+      if (!state.cancel) { say("err", "409 状态不允许：没有取消请求。"); return; }
+      if (state.cancel.status === "pending") {
+        state.cancel.status = "confirmed";
+        state.order.status = "cancelled";
+        addEvent("cancellation_confirmed", "buyer", "app");
+        addEvent("order_cancelled", "buyer", "app");
+        say("ok", "请求 → confirmed，订单 → cancelled。两条迁移在同一个事务里。");
+        render();
+        return;
+      }
+      if (state.cancel.status === "confirmed" && state.order.status === "cancelled") {
+        say("ok", "幂等：返回同一结果，idempotent=true，不会重复取消。");
+        return;
+      }
+      say("err", "409 状态不允许：最新请求是 " + state.cancel.status + "。");
+    }
+
+    function withdrawCancel() {
+      if (!state.order) { say("err", "404 未找到：还没有订单。"); return; }
+      if (!state.cancel) { say("err", "409 状态不允许：没有取消请求。"); return; }
+      if (state.cancel.status === "pending") {
+        state.cancel.status = "withdrawn";
+        addEvent("cancellation_withdrawn", "buyer", "app");
+        say("ok", "请求 → withdrawn；订单仍是 created。");
+        render();
+        return;
+      }
+      if (state.cancel.status === "withdrawn") {
+        say("ok", "幂等：请求已经是 withdrawn。");
+        return;
+      }
+      say("err", "409 状态不允许：最新请求是 " + state.cancel.status + "。");
+    }
+
+    function otherBuyer() {
+      say("err", "404 未找到：这张草稿不属于 b2。服务端不区分「不存在」和「不是你的」。");
+    }
+
+    function reset() {
+      state = { draft: null, order: null, cancel: null };
+      events = [];
+      say("", "还没有任何记录。先建一份草稿。");
+      renderLog();
+      render();
+    }
+
+    var ACTIONS = {
+      "draft": createDraft,
+      "confirm": confirmDraft,
+      "cancel-draft": cancelDraft,
+      "request-cancel": requestCancel,
+      "confirm-cancel": confirmCancel,
+      "withdraw-cancel": withdrawCancel,
+      "other": otherBuyer,
+      "reset": reset
+    };
+
+    document.querySelectorAll(".sim-btn").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var fn = ACTIONS[b.getAttribute("data-act")];
+        if (fn) fn();
+      });
+    });
+
+    msg = document.getElementById("sim-msg");
+    log = document.getElementById("sim-log");
+    reset();
+  })();
+</script>

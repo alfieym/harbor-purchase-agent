@@ -41,6 +41,9 @@ async def intents(request: CommerceIntentRequest, http_request: Request) -> Comm
             request.shopping_session_id,
             request.raw_query,
             timeout_seconds=settings.turn_timeout_seconds,
+            # S10: absent in older/degraded deployments; ``run_turn`` then omits
+            # ``pending_draft`` instead of failing.
+            order_service=getattr(http_request.app.state, "order_service", None),
         )
     except ContextCapacityError as exc:
         raise HTTPException(status_code=507, detail="上下文超出容量闸门") from exc

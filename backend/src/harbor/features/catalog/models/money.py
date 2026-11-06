@@ -1,6 +1,6 @@
 """Money value object and currency helpers."""
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -18,6 +18,22 @@ _MINOR_UNIT_EXPONENTS: dict[str, int] = {
     "JPY": 0,
     "SGD": 2,
 }
+
+
+def minor_unit_exponent(currency: str) -> int:
+    """Fractional digits for ``currency``; unknown codes behave like CNY/USD."""
+    return _MINOR_UNIT_EXPONENTS.get(currency, 2)
+
+
+def quantize_major(amount: Decimal, currency: str) -> Decimal:
+    """Round ``amount`` to the currency's minor unit using ``ROUND_HALF_UP``.
+
+    Order pricing quantizes each unit price once, then multiplies by quantity;
+    re-quantizing a line subtotal would double-round and break the invariant
+    that an order total equals the sum of its lines.
+    """
+    quantum = Decimal(1).scaleb(-minor_unit_exponent(currency))
+    return amount.quantize(quantum, rounding=ROUND_HALF_UP)
 
 
 class Money(BaseModel):
@@ -40,7 +56,7 @@ class Money(BaseModel):
     @property
     def amount_in_minor_units(self) -> int:
         """Return the amount expressed in the currency's minor units."""
-        exponent = _MINOR_UNIT_EXPONENTS.get(self.currency, 2)
+        exponent = minor_unit_exponent(self.currency)
         minor = self.amount.scaleb(exponent)
         if minor != minor.to_integral_value():
             raise ValueError(

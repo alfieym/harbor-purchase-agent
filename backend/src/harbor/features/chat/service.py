@@ -24,6 +24,8 @@ from harbor.agents.grounding import ground_cards, tool_results_since
 from harbor.agents.preferences import IDENTITY_STATE_KEY
 from harbor.features.chat.repository import SessionKey, SessionRepository, SnapshotWriteError
 from harbor.features.chat.schemas import CommerceIntentResponse
+from harbor.features.orders.schemas import OrderDraftView
+from harbor.features.orders.service import OrderService
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +112,15 @@ class SessionStore:
                 state = await asyncio.to_thread(self._repository.load, key)
             if state is None:
                 state = AgentState()
-            # S8: the buyer id travels in the state, not in the factory signature
-            # (``agent_factory(state)``), so long-term memory can be scoped to the
-            # buyer without touching every existing factory.
-            state.middle_context[IDENTITY_STATE_KEY] = {"buyer_id": buyer_id}
+            # S8/S10: identity travels in the state, not in the factory signature
+            # (``agent_factory(state)``), so long-term memory and the order tools
+            # can scope themselves without touching every existing factory.
+            # The draft's uniqueness key is ``(buyer_id, shopping_session_id)``,
+            # so the tool needs both ids, not just the buyer.
+            state.middle_context[IDENTITY_STATE_KEY] = {
+                "buyer_id": buyer_id,
+                "shopping_session_id": shopping_session_id,
+            }
             session = Session(
                 agent=self._agent_factory(state), lock=asyncio.Lock(), last_active=now
             )
@@ -191,14 +198,43 @@ class SessionStore:
         return len(self._sessions)
 
 
+async def _with_pending_draft(
+    response: CommerceIntentResponse,
+    order_service: OrderService,
+    buyer_id: str,
+    shopping_session_id: str,
+) -> CommerceIntentResponse:
+    """Return ``response`` plus the session's pending draft, if any (S10)."""
+    try:
+        draft = await order_service.get_pending_draft(
+            buyer_id=buyer_id, shopping_session_id=shopping_session_id
+        )
+    except Exception:  # noqa: BLE001 — the order DB must not break a chat turn
+        logger.warning(
+            "failed to read the pending draft for %r",
+            (buyer_id, shopping_session_id),
+            exc_info=True,
+        )
+        return response
+    if draft is None:
+        return response
+    return response.model_copy(update={"pending_draft": OrderDraftView.from_draft(draft)})
+
+
 async def run_turn(
     store: SessionStore,
     buyer_id: str,
     shopping_session_id: str,
     raw_query: str,
     timeout_seconds: float = 120.0,
+    order_service: OrderService | None = None,
 ) -> CommerceIntentResponse:
-    """Run one conversational turn and return the model's product cards."""
+    """Run one conversational turn and return the model's product cards.
+
+    With ``order_service`` wired (S10), the response also carries the session's
+    pending draft. That value is read back from the database, so the buyer
+    confirms the stored rows rather than anything the model transcribed.
+    """
     while True:
         key, session = await store.get_or_create(buyer_id, shopping_session_id)
         try:
@@ -256,6 +292,13 @@ async def run_turn(
                 # output; only products this turn's tools returned are real.
                 grounded = ground_cards(cards.cards, this_turn)
                 response = CommerceIntentResponse(final_text=cards.summary, cards=grounded)
+                # S10: attach the draft before persisting so the journal records
+                # what the buyer was shown. A read failure must not lose the
+                # model's answer or the session, so it degrades to "no draft".
+                if order_service is not None:
+                    response = await _with_pending_draft(
+                        response, order_service, buyer_id, shopping_session_id
+                    )
                 await store.persist(key, session.agent, raw_query, response)
                 return response
         except Exception:

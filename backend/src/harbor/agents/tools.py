@@ -7,6 +7,8 @@ the ``SearchResult`` as a compact JSON chunk the model can read.
 
 import asyncio
 import json
+import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -15,9 +17,15 @@ from agentscope.state import AgentState
 from agentscope.tool import FunctionTool, ToolChunk
 from pydantic import BaseModel, Field
 
+from harbor.agents.preferences import IDENTITY_STATE_KEY
 from harbor.features.catalog.models import ProductSearchSpec
 from harbor.features.catalog.search.fx import convert
 from harbor.features.catalog.search.schemas import SearchResult
+from harbor.features.orders.models import SearchEvidence
+
+logger = logging.getLogger(__name__)
+
+EvidenceRecorder = Callable[..., Awaitable[None]]
 
 
 class ProductSearchArgs(BaseModel):
@@ -91,12 +99,49 @@ class FixedSearchConstraints:
     excluded_material_tags: tuple[str, ...] = ()
 
 
+async def _record_search_evidence(
+    recorder: EvidenceRecorder, state: AgentState, hits: list[dict]
+) -> None:
+    """Persist hits for the session; any failure is logged, never raised.
+
+    Evidence is an optimisation for later turns — the draft tool can still fall
+    back to this turn's context. Failing the search because the evidence table
+    is unavailable would turn a degraded feature into an outage (S10).
+    """
+    identity = state.middle_context.get(IDENTITY_STATE_KEY)
+    if not isinstance(identity, dict):
+        return
+    buyer_id = identity.get("buyer_id")
+    shopping_session_id = identity.get("shopping_session_id")
+    if not buyer_id or not shopping_session_id or not hits:
+        return
+    evidence = [
+        SearchEvidence(
+            product_id=hit["product_id"],
+            sku_id=hit["selected_sku_id"],
+            title=hit["title"],
+            unit_price=Decimal(str(hit["price_major"])),
+            currency=hit["currency"],
+        )
+        for hit in hits
+    ]
+    try:
+        await recorder(
+            buyer_id=buyer_id,
+            shopping_session_id=shopping_session_id,
+            evidence=evidence,
+        )
+    except Exception:  # noqa: BLE001 — evidence is best-effort
+        logger.warning("failed to record product evidence", exc_info=True)
+
+
 def make_product_search_tool(
     service,
     memory=None,
     *,
     fixed_constraints: FixedSearchConstraints | None = None,
     description: str | None = None,
+    evidence_recorder: EvidenceRecorder | None = None,
 ) -> FunctionTool:
     """Build the ``product_search`` tool backed by a ``CatalogSearchService``.
 
@@ -149,12 +194,11 @@ def make_product_search_tool(
         # it to a worker thread — otherwise it blocks the event loop and two
         # concurrent sessions serialize on it (S5-4).
         result = await asyncio.to_thread(service.search, query, spec, 10)
+        payload = _search_result_to_dict(result, currency)
+        if evidence_recorder is not None and _agent_state is not None:
+            await _record_search_evidence(evidence_recorder, _agent_state, payload["hits"])
         return ToolChunk(
-            content=[
-                TextBlock(
-                    text=json.dumps(_search_result_to_dict(result, currency), ensure_ascii=False)
-                )
-            ],
+            content=[TextBlock(text=json.dumps(payload, ensure_ascii=False))],
             state=ToolResultState.SUCCESS,
         )
 

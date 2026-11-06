@@ -14,6 +14,7 @@ from agentscope.permission import PermissionBehavior, PermissionRule
 
 PRODUCT_SEARCH_TOOL = "product_search"
 DISPATCH_TOOL = "task_dispatch"
+ORDER_TOOLS = ("create_order_draft", "get_order")
 
 
 def allow_tool(agent: Agent, tool_name: str) -> None:
@@ -37,3 +38,13 @@ def allow_product_search_tool(agent: Agent) -> None:
 def allow_dispatch_tool(agent: Agent) -> None:
     """Let ``agent`` call ``task_dispatch`` without a confirmation prompt."""
     allow_tool(agent, DISPATCH_TOOL)
+
+
+def allow_order_tools(agent: Agent) -> None:
+    """Let ``agent`` call the transaction tools without a confirmation prompt.
+
+    These tools write drafts only; the human gate is the application layer's
+    confirm endpoint, so no permission prompt is needed here (S10).
+    """
+    for tool_name in ORDER_TOOLS:
+        allow_tool(agent, tool_name)

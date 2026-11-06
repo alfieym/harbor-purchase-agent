@@ -19,11 +19,13 @@ import json
 import re
 import unicodedata
 from collections.abc import Iterable, Sequence
+from decimal import Decimal
 from typing import Any
 
 from agentscope.message import Msg, ToolResultState
 
 from harbor.agents.cards import ProductCard
+from harbor.features.orders.models import SearchEvidence
 
 _SEARCH_TOOL = "product_search"
 _DISPATCH_TOOL = "task_dispatch"
@@ -49,6 +51,57 @@ def ground_cards(cards: Iterable[ProductCard], blocks: Iterable[Any]) -> list[Pr
     for block in blocks:
         evidence.add(block)
     return [card for card in cards if evidence.supports(card)]
+
+
+def search_evidence_from_context(context: Sequence[Msg]) -> list[SearchEvidence]:
+    """Price observations from this session's successful ``product_search`` calls.
+
+    Later observations win: a SKU re-searched after a price change must price a
+    draft at the newest value, not the first one the model saw. S7 compression
+    may have removed these messages from context — the durable evidence table is
+    tried first — but whatever is still here beats making the model recite a
+    price.
+    """
+    latest: dict[str, SearchEvidence] = {}
+    for message in context:
+        for block in message.get_content_blocks("tool_result"):
+            if getattr(block, "name", None) != _SEARCH_TOOL:
+                continue
+            if getattr(block, "state", None) != ToolResultState.SUCCESS:
+                continue
+            for text in _text_blocks(block):
+                try:
+                    payload = json.loads(text)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                for hit in payload.get("hits") or []:
+                    evidence = _search_hit_evidence(hit)
+                    if evidence is not None:
+                        latest[evidence.sku_id] = evidence
+    return list(latest.values())
+
+
+def _search_hit_evidence(hit: Any) -> SearchEvidence | None:
+    if not isinstance(hit, dict):
+        return None
+    sku_id = hit.get("selected_sku_id")
+    price = hit.get("price_major")
+    currency = hit.get("currency")
+    if not sku_id or price is None or not currency:
+        return None
+    try:
+        unit_price = Decimal(str(price))
+    except ArithmeticError:
+        return None
+    return SearchEvidence(
+        product_id=hit.get("product_id") or None,
+        sku_id=str(sku_id),
+        title=str(hit.get("title") or ""),
+        unit_price=unit_price,
+        currency=str(currency),
+    )
 
 
 def _text_blocks(block: Any) -> list[str]:

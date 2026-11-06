@@ -54,6 +54,24 @@ PREFERENCE_GUIDANCE = """\
   作为 expected_version 传回。作用域不能改，要换作用域先 delete 再 add。
 """
 
+# S10: the model drafts; the buyer confirms. Everything here exists to keep the
+# two apart in the model's head — the tool cannot create an order, so a model
+# that believes it can will lie to the user about what happened.
+ORDER_GUIDANCE = """\
+
+## 下单草稿（交易）
+- 只有用户明确要买某件商品时，才调用 create_order_draft。用户只是问价、比较、
+  犹豫时不要建草稿。
+- 草稿行只能来自本会话 product_search 的命中：product_id 与 sku_id 必须原样取自
+  hits，不要凭记忆或推测填写。不要填价格——价格由系统按检索证据确定。
+- 用户没说数量时 quantity 用 1。
+- 草稿不是订单：你没有确认能力，必须由买家在应用界面确认后才会生成订单。
+  因此禁止说「已下单」「订单已创建」「已经买好了」；应当说「草稿已生成，请确认」。
+- 工具返回 ok=false 时，按 error 向用户解释原因并修正参数；不要假装成功。
+- 用户要取消订单或查询取消进度时，说明取消需要用户在应用界面发起并确认。
+- summary 仍然只描述本轮。
+"""
+
 # S9: the parent's dispatch discipline. The model decides when to delegate; the
 # code does not keyword-match. What the prompt must make unmissable is the cost
 # (context), the three conditions, and that receipts are not testimony.
@@ -66,7 +84,7 @@ DISPATCH_GUIDANCE = """\
 2. 需要上下文隔离：中间过程很长，留在主上下文会挤掉重要信息。
 3. 链路够深：子任务需要多轮检索、换词或筛选。
 任一不成立，就自己做——一次 product_search 能完成的，不要派。
-订单/「查单」能力尚未接入，不要派交易类任务。
+{transaction_note}
 
 ## 怎么把活说明白
 - goal 必须自包含：子 Agent 没有用户，也没有这段对话，它不知道「刚才那个」。
@@ -167,6 +185,7 @@ def system_prompt_for(
     archive_enabled: bool = True,
     preferences_enabled: bool = False,
     dispatch_enabled: bool = False,
+    orders_enabled: bool = False,
     dispatch_ledger: Mapping[str, Any] | None = None,
 ) -> str:
     """Append the catalog's real category vocabulary to the system prompt.
@@ -195,8 +214,15 @@ def system_prompt_for(
             f"\n目录中的商品类目只有：{'、'.join(vocabulary)}。category 必须是其中之一，或省略。"
         )
     if dispatch_enabled:
-        parts.append("\n" + DISPATCH_GUIDANCE)
+        transaction_note = (
+            "子 Agent 没有买家身份，不能下单；交易任务不要派。"
+            if orders_enabled
+            else "订单/「查单」能力尚未接入，不要派交易类任务。"
+        )
+        parts.append("\n" + DISPATCH_GUIDANCE.replace("{transaction_note}", transaction_note))
         ledger_block = dispatch_ledger_prompt_block(dispatch_ledger)
         if ledger_block:
             parts.append("\n" + ledger_block + "\n")
+    if orders_enabled:
+        parts.append(ORDER_GUIDANCE)
     return "".join(parts)

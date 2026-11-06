@@ -30,7 +30,12 @@ from harbor.agents.dispatch import (
     read_dispatch_ledger,
 )
 from harbor.agents.models import build_chat_model
-from harbor.agents.permissions import allow_dispatch_tool, allow_product_search_tool
+from harbor.agents.order_tools import make_order_tools
+from harbor.agents.permissions import (
+    allow_dispatch_tool,
+    allow_order_tools,
+    allow_product_search_tool,
+)
 from harbor.agents.preferences import (
     IDENTITY_STATE_KEY,
     PreferenceMemory,
@@ -45,6 +50,7 @@ from harbor.features.catalog.search.embedder import Embedder, OpenAIEmbedder
 from harbor.features.catalog.search.rerank import FastembedReranker
 from harbor.features.catalog.search.service import CatalogSearchService
 from harbor.features.memory.sqlite_store import SqliteMemoryStore
+from harbor.features.orders.service import OrderService
 
 DEFAULT_DATA_PATH = Path(__file__).resolve().parents[4] / "data" / "catalog-v1.jsonl"
 INDEX_CACHE_DIR = Path(__file__).resolve().parents[4] / ".cache" / "catalog-index"
@@ -174,17 +180,21 @@ def build_runtime(settings: Settings, data_path: Path | None = None) -> AgentRun
     )
 
 
-def _buyer_id_from(state: AgentState | None, explicit: str | None) -> str | None:
-    """``buyer_id`` from the caller, else from the identity the store injected."""
-    if explicit:
-        return explicit
-    if state is None:
-        return None
-    identity = state.middle_context.get(IDENTITY_STATE_KEY)
-    if not isinstance(identity, dict):
-        return None
-    buyer_id = identity.get("buyer_id")
-    return buyer_id if isinstance(buyer_id, str) and buyer_id else None
+def _identity_from(
+    state: AgentState | None,
+    buyer_id: str | None,
+    shopping_session_id: str | None,
+) -> tuple[str | None, str | None]:
+    """Resolve both ids: the caller wins, else the identity the store injected."""
+    stored = state.middle_context.get(IDENTITY_STATE_KEY) if state is not None else None
+    if not isinstance(stored, dict):
+        stored = {}
+    buyer = buyer_id or stored.get("buyer_id")
+    session = shopping_session_id or stored.get("shopping_session_id")
+    return (
+        buyer if isinstance(buyer, str) and buyer else None,
+        session if isinstance(session, str) and session else None,
+    )
 
 
 def build_agent(
@@ -192,20 +202,36 @@ def build_agent(
     state: AgentState | None = None,
     *,
     buyer_id: str | None = None,
+    shopping_session_id: str | None = None,
+    order_service: OrderService | None = None,
 ) -> Agent:
     """Assemble a fresh per-session Agent on top of the shared runtime.
 
     ``state`` restores a previous session's full conversation (S6): the store
-    passes the snapshot it loaded from disk, or a fresh state. ``buyer_id``
-    comes from that state's injected identity; the explicit argument is for
-    callers without a store (the CLI), and overrides it.
+    passes the snapshot it loaded from disk, or a fresh state. ``buyer_id`` and
+    ``shopping_session_id`` come from that state's injected identity; the
+    explicit arguments are for callers without a store (the CLI), and override
+    it. ``order_service`` (S10) enables the transaction tools; ``None`` keeps the
+    pre-S10 read-only agent.
     """
     settings = runtime.settings
     # S7-5: ``legacy`` is the pre-S7 baseline — no middleware, no archive tool,
     # and AgentScope's own compression defaults. ``governed`` wraps every
     # compression and every model call with the S7 guarantees.
     governed = settings.context_strategy == "governed"
-    buyer_id = _buyer_id_from(state, buyer_id)
+    buyer_id, shopping_session_id = _identity_from(state, buyer_id, shopping_session_id)
+    if buyer_id is not None and shopping_session_id is not None:
+        # Write the resolved pair back so the tools (which read state, not
+        # function arguments) see the same identity the rest of the agent does.
+        if state is None:
+            state = AgentState()
+        identity = dict(state.middle_context.get(IDENTITY_STATE_KEY) or {})
+        identity["buyer_id"] = buyer_id
+        identity["shopping_session_id"] = shopping_session_id
+        state.middle_context[IDENTITY_STATE_KEY] = identity
+    # S10: the kill switch removes the tools as well as the recorder, so the
+    # model cannot ask for a capability the application layer will not honour.
+    orders_enabled = order_service is not None and settings.transaction_enabled
     # S9: dispatch is a governed-only capability; the ledger restores the last
     # persisted plan so unfinished tasks are not silently forgotten.
     dispatch_enabled = governed and settings.dispatch_enabled
@@ -215,6 +241,7 @@ def build_agent(
         archive_enabled=governed,
         preferences_enabled=governed,
         dispatch_enabled=dispatch_enabled,
+        orders_enabled=orders_enabled,
         dispatch_ledger=ledger,
     )
     # S8: without a buyer id the turn/session scopes still work; the memory
@@ -230,13 +257,22 @@ def build_agent(
         if governed
         else None
     )
-    tool = make_product_search_tool(runtime.service, memory=memory)
+    # The ``None`` check (not just ``orders_enabled``) is what narrows the type.
+    active_orders = order_service if orders_enabled else None
+    tool = make_product_search_tool(
+        runtime.service,
+        memory=memory,
+        # S10: only the main agent records evidence; the S9 sub-agent runner
+        # builds its own search tool and must not write for the parent session.
+        evidence_recorder=(active_orders.record_search_hits if active_orders is not None else None),
+    )
+    order_tools = make_order_tools(active_orders) if active_orders is not None else []
     if not governed:
         agent = Agent(
             name="purchase_agent",
             system_prompt=prompt,
             model=runtime.model,
-            toolkit=Toolkit([tool]),
+            toolkit=Toolkit([tool, *order_tools]),
             state=state,
             # ``interruption_raise_cancelled_error=True``: when ``run_turn``'s
             # ``asyncio.wait_for`` cancels a turn at the timeout budget,
@@ -263,6 +299,7 @@ def build_agent(
             tool,
             make_read_archive_tool(offloader),
             *make_preference_tools(memory),
+            *order_tools,
         ]
         if dispatch_enabled:
             runner = AgentSubAgentRunner(
@@ -305,4 +342,6 @@ def build_agent(
     allow_product_search_tool(agent)
     if dispatch_enabled:
         allow_dispatch_tool(agent)
+    if orders_enabled:
+        allow_order_tools(agent)
     return agent
