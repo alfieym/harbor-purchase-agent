@@ -10,6 +10,7 @@ LRU past a cap.
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,14 +19,22 @@ from agentscope.agent import Agent
 from agentscope.message import ToolResultState, UserMsg
 from agentscope.state import AgentState
 
-from harbor.agents.cards import ProductCardList
+from harbor.agents.cards import ProductCard, ProductCardList
 from harbor.agents.context_governance import ContextCapacityError, recorded_turn_count
-from harbor.agents.grounding import ground_cards, tool_results_since
+from harbor.agents.grounding import (
+    ground_cards,
+    search_evidence_from_context,
+    tool_results_since,
+)
 from harbor.agents.preferences import IDENTITY_STATE_KEY
 from harbor.features.chat.repository import SessionKey, SessionRepository, SnapshotWriteError
 from harbor.features.chat.schemas import CommerceIntentResponse
 from harbor.features.orders.schemas import OrderDraftView
 from harbor.features.orders.service import OrderService
+from harbor.guardrails.events import log_guard_event
+from harbor.guardrails.output import GroundingFacts, OutputGuard
+from harbor.guardrails.runtime import GuardRuntime
+from harbor.guardrails.session import GuardSession
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +79,8 @@ class Session:
     agent: Agent
     lock: asyncio.Lock
     last_active: float
+    # S11: per-session loop/sequence state; ``None`` when the guard is off.
+    guard: GuardSession | None = None
 
 
 class SessionStore:
@@ -82,12 +93,15 @@ class SessionStore:
         max_sessions: int = 1000,
         clock: Callable[[], float] = time.monotonic,
         repository: SessionRepository | None = None,
+        guard: GuardRuntime | None = None,
     ) -> None:
         self._agent_factory = agent_factory
         self._ttl = ttl_seconds
         self._max = max_sessions
         self._clock = clock
         self._repository = repository
+        # S11: the process-wide guard; ``None`` keeps the pre-S11 behaviour.
+        self.guard = guard
         self._sessions: dict[SessionKey, Session] = {}
         self._mutex = asyncio.Lock()
 
@@ -124,6 +138,9 @@ class SessionStore:
             session = Session(
                 agent=self._agent_factory(state), lock=asyncio.Lock(), last_active=now
             )
+            # S11: ``build_agent`` attaches the session it wrapped the tools
+            # with; a fake agent without one simply runs unguarded.
+            session.guard = getattr(session.agent, "guard_session", None)
             self._sessions[key] = session
             return key, session
 
@@ -221,6 +238,59 @@ async def _with_pending_draft(
     return response.model_copy(update={"pending_draft": OrderDraftView.from_draft(draft)})
 
 
+_ORDER_ID = re.compile(r"\bord_[A-Za-z0-9_-]+")
+
+
+async def _order_flags(
+    order_service: OrderService | None, buyer_id: str, text: str
+) -> tuple[bool, bool]:
+    """Which order states the reply may legitimately claim (S11 L4 grounding).
+
+    An id the model made up, or one belonging to another buyer, raises in
+    ``get_order``; that claim stays ungrounded and the guard rewrites it.
+    """
+    if order_service is None:
+        return False, False
+    confirmed = cancelled = False
+    for order_id in set(_ORDER_ID.findall(text)):
+        try:
+            order, _request = await order_service.get_order(
+                order_id=order_id, buyer_id=buyer_id
+            )
+        except Exception:  # noqa: BLE001 — an unknown order is an ungrounded claim
+            continue
+        if order.status == "confirmed":
+            confirmed = True
+        elif order.status == "cancelled":
+            cancelled = True
+    return confirmed, cancelled
+
+
+def _guard_output(
+    guard: GuardRuntime,
+    summary: str,
+    cards: list[ProductCard],
+    facts: GroundingFacts,
+) -> tuple[str, list[ProductCard]]:
+    """Repair the reply in place of rejecting it (spec §8)."""
+    output_guard = OutputGuard(guard.reply_max_chars)
+    checked = output_guard.check(summary, facts)
+    if checked.hits:
+        guard.metrics.incr("output.guarded", count=len(checked.hits))
+        for rule in checked.hits:
+            log_guard_event("output.guarded", rule=rule)
+    guarded: list[ProductCard] = []
+    for card in cards:
+        highlights: list[str] = []
+        for line in card.highlights:
+            result = output_guard.check(line, facts)
+            if result.hits:
+                guard.metrics.incr("output.guarded", count=len(result.hits))
+            highlights.append(result.text)
+        guarded.append(card.model_copy(update={"highlights": highlights}))
+    return checked.text, guarded
+
+
 async def run_turn(
     store: SessionStore,
     buyer_id: str,
@@ -234,7 +304,16 @@ async def run_turn(
     With ``order_service`` wired (S10), the response also carries the session's
     pending draft. That value is read back from the database, so the buyer
     confirms the stored rows rather than anything the model transcribed.
+
+    With a guard (S11) an exhausted budget short-circuits before the agent is
+    called: ``run_turn`` demands structured output, and a plain-text refusal
+    from inside the loop would be retried until the turn 502s.
     """
+    if store.guard is not None and not store.guard.budget.turn_allowed():
+        store.guard.metrics.incr("budget.exhausted")
+        log_guard_event("budget.exhausted", reason="turn_fallback")
+        return CommerceIntentResponse(final_text=store.guard.rule_fallback_text(), cards=[])
+
     while True:
         key, session = await store.get_or_create(buyer_id, shopping_session_id)
         try:
@@ -245,6 +324,10 @@ async def run_turn(
                 # half-updated ``state.context`` into the snapshot we persist.
                 if not store.is_cached(key, session):
                     continue
+                # S11: the loop window and sequence history are per turn — a
+                # second identical search next turn is not a loop.
+                if session.guard is not None:
+                    session.guard.begin_turn()
                 # Snapshot the tool results so a failure is attributed to *this*
                 # turn: ``state.context`` persists across resumed sessions, and an
                 # ERROR from an earlier turn must not fail a later one. Track block
@@ -291,7 +374,32 @@ async def run_turn(
                 # The model can copy cards from an earlier turn's structured
                 # output; only products this turn's tools returned are real.
                 grounded = ground_cards(cards.cards, this_turn)
-                response = CommerceIntentResponse(final_text=cards.summary, cards=grounded)
+                # S11 L4: repair prices, completion claims and leaks before the
+                # buyer — and before ``persist`` journals what was shown.
+                summary = cards.summary
+                guarded_cards: list[ProductCard] = grounded
+                if store.guard is not None:
+                    evidence = search_evidence_from_context(session.agent.state.context)
+                    prices = frozenset(
+                        (item.currency, item.unit_price) for item in evidence
+                    )
+                    reply_text = " ".join(
+                        [cards.summary, *(h for card in grounded for h in card.highlights)]
+                    )
+                    confirmed, cancelled = await _order_flags(
+                        order_service, buyer_id, reply_text
+                    )
+                    summary, guarded_cards = _guard_output(
+                        store.guard,
+                        cards.summary,
+                        grounded,
+                        GroundingFacts(
+                            prices=prices,
+                            has_confirmed_order=confirmed,
+                            has_cancelled_order=cancelled,
+                        ),
+                    )
+                response = CommerceIntentResponse(final_text=summary, cards=guarded_cards)
                 # S10: attach the draft before persisting so the journal records
                 # what the buyer was shown. A read failure must not lose the
                 # model's answer or the session, so it degrades to "no draft".

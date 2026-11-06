@@ -50,6 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 runtime, state=state, order_service=order_service
             ),
             repository=repo,
+            guard=runtime.guard,
         )
         # Exposed for introspection/observability and for the fault-injection
         # smoke test (verify_s5 patches runtime.service.search to force 502).

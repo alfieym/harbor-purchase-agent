@@ -28,6 +28,7 @@ class GuardRuntime:
     loop_window: int = 8
     loop_threshold: int = 3
     tool_output_max_chars: int = 8000
+    reply_max_chars: int = 4000
 
     @classmethod
     def from_settings(cls, settings: Settings) -> GuardRuntime:
@@ -48,6 +49,7 @@ class GuardRuntime:
             loop_window=settings.guard_loop_window,
             loop_threshold=settings.guard_loop_threshold,
             tool_output_max_chars=settings.guard_tool_output_max_chars,
+            reply_max_chars=settings.guard_reply_max_chars,
         )
 
     def new_session(self) -> GuardSession:
