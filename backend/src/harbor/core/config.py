@@ -111,6 +111,28 @@ class Settings(BaseSettings):
     )
     evidence_retention_days: int = Field(default=30, ge=1)
 
+    # S11: guardrails. The kill switch disables all ten behaviours and returns
+    # the system to its S10 semantics.
+    guardrails_enabled: bool = True
+    guard_request_timeout_seconds: float = Field(default=20.0, gt=0)
+    guard_max_retries: int = Field(default=1, ge=0)
+    guard_retry_backoff_seconds: float = Field(default=0.5, ge=0)
+    guard_circuit_failure_threshold: int = Field(default=3, ge=1)
+    guard_circuit_cooldown_seconds: float = Field(default=60.0, gt=0)
+    guard_fallback_model: str | None = None
+    guard_lite_model: str | None = None
+    # Daily, global (not per buyer), counted in tokens.
+    guard_daily_token_budget: int = Field(default=500_000, ge=1)
+    guard_budget_db_path: Path = (
+        Path(__file__).resolve().parents[4] / "data" / "sessions" / "token_budget.sqlite3"
+    )
+    guard_chars_per_token: float = Field(default=2.0, gt=0)
+    guard_estimate_safety_factor: float = Field(default=1.2, gt=1)
+    guard_loop_window: int = Field(default=8, ge=1)
+    guard_loop_threshold: int = Field(default=3, ge=2)
+    guard_tool_output_max_chars: int = Field(default=8000, ge=1)
+    guard_reply_max_chars: int = Field(default=4000, ge=1)
+
     # S9: multi-agent dispatch. The batch budget must fit inside the parent
     # turn, or a slow batch would turn the whole request into a 504 (S9-4).
     dispatch_enabled: bool = True
@@ -120,7 +142,7 @@ class Settings(BaseSettings):
     dispatch_max_tasks: int = Field(default=6, ge=1, le=12)
 
     @model_validator(mode="after")
-    def _dispatch_budget_fits_turn(self) -> "Settings":
+    def _budgets_fit_inside_turn(self) -> "Settings":
         # With dispatch off the budget is unused, so a turn-only test config
         # needs no matching batch value.
         if (
@@ -129,6 +151,16 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "dispatch_batch_timeout_seconds must be less than turn_timeout_seconds"
+            )
+        # Same reasoning for the S11 request budget: retries must fit in a turn
+        # or the outer 504 would always win.
+        if self.guardrails_enabled and (
+            self.guard_request_timeout_seconds * (self.guard_max_retries + 1)
+            >= self.turn_timeout_seconds
+        ):
+            raise ValueError(
+                "guard_request_timeout_seconds * (guard_max_retries + 1) "
+                "must be less than turn_timeout_seconds"
             )
         return self
 
