@@ -83,6 +83,45 @@ def search_evidence_from_context(context: Sequence[Msg]) -> list[SearchEvidence]
     return list(latest.values())
 
 
+def dispatch_prices_from_context(context: Sequence[Msg]) -> frozenset[tuple[str, Decimal]]:
+    """Prices S9's child agents verified against their own search results.
+
+    The parent quotes these after a dispatch, and its context no longer holds
+    the raw ``product_search`` hits the children saw, so the verified refs are
+    the only durable evidence for those numbers.
+    """
+    prices: set[tuple[str, Decimal]] = set()
+    for message in context:
+        for block in message.get_content_blocks("tool_result"):
+            if getattr(block, "name", None) != _DISPATCH_TOOL:
+                continue
+            if getattr(block, "state", None) != ToolResultState.SUCCESS:
+                continue
+            for text in _text_blocks(block):
+                try:
+                    payload = json.loads(text)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                for result in payload.get("results") or []:
+                    if not isinstance(result, dict) or not result.get("ok"):
+                        continue
+                    for ref in result.get("evidence_refs") or []:
+                        if (
+                            not isinstance(ref, dict)
+                            or not ref.get("verified")
+                            or ref.get("field") != "price_major"
+                        ):
+                            continue
+                        try:
+                            amount = Decimal(str(ref.get("value")))
+                        except ArithmeticError:
+                            continue
+                        prices.add((str(ref.get("currency") or "CNY"), amount))
+    return frozenset(prices)
+
+
 def _search_hit_evidence(hit: Any) -> SearchEvidence | None:
     if not isinstance(hit, dict):
         return None

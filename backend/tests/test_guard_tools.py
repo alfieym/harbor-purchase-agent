@@ -80,3 +80,14 @@ def test_blocked_call_does_not_enter_the_window() -> None:
     blocked = asyncio.run(tool(x=1))
     assert '"loop_detected"' in blocked.content[0].text
     assert len(session.recent_tool_calls) == 1
+
+
+def test_second_dispatch_in_a_turn_is_blocked() -> None:
+    inner = EchoTool(name="task_dispatch")
+    tool = GuardedTool(
+        inner, session=GuardSession(), metrics=GuardMetrics(), content_filter=ContentFilter()
+    )
+    asyncio.run(tool(tasks=[]))
+    out = asyncio.run(tool(tasks=[]))
+    assert "sequence_violation" in out.content[0].text
+    assert inner.calls == 1

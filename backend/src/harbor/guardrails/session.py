@@ -35,6 +35,14 @@ DEFAULT_SEQUENCE_RULES: tuple[GuardRule, ...] = (
         forbidden_before=("create_order_draft",),
         message="本轮已创建过草稿，请修改已有草稿或直接询问买家，不要重复创建",
     ),
+    # Spec §6.2: one dispatch per turn. A second dispatch re-runs the same
+    # child searches and multiplies latency and token spend without adding
+    # evidence — the first round's results are already in context.
+    GuardRule(
+        tool="task_dispatch",
+        forbidden_before=("task_dispatch",),
+        message="本轮已分派过子任务，请基于已有结果直接回复，不要重复派发",
+    ),
 )
 
 

@@ -1,3 +1,4 @@
+import asyncio
 import threading
 from datetime import date
 from pathlib import Path
@@ -76,3 +77,35 @@ def test_unwritable_db_fails_open(tmp_path, caplog) -> None:
     assert b.used_today() == 0
     assert b.tier() is BudgetTier.MAIN
     assert b.turn_allowed() is True
+
+
+def test_async_wrappers_keep_sqlite_off_the_event_loop(tmp_path, monkeypatch) -> None:
+    # The reviewer's Important finding: a synchronous sqlite call inside an
+    # async path freezes every other coroutine. If acquire_async runs the
+    # sync method in a thread, the ticker fires while the "disk" is busy.
+    import time
+
+    from harbor.guardrails.budget import Admission
+
+    budget = SqliteTokenBudget(tmp_path / "a.sqlite3", 1000)
+    order: list[str] = []
+
+    def slow_acquire(tokens: int) -> Admission:
+        time.sleep(0.2)
+        order.append("acquired")
+        return Admission(True, tokens, BudgetTier.MAIN, 1.0)
+
+    monkeypatch.setattr(budget, "acquire", slow_acquire)
+
+    async def main() -> None:
+        async def ticker() -> None:
+            await asyncio.sleep(0.01)
+            order.append("tick")
+
+        task = asyncio.create_task(ticker())
+        await budget.acquire_async(1)
+        await task
+
+    asyncio.run(main())
+
+    assert order == ["tick", "acquired"]

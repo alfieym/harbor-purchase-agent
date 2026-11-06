@@ -14,6 +14,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 
 from agentscope.agent import Agent
 from agentscope.message import ToolResultState, UserMsg
@@ -22,6 +23,7 @@ from agentscope.state import AgentState
 from harbor.agents.cards import ProductCard, ProductCardList
 from harbor.agents.context_governance import ContextCapacityError, recorded_turn_count
 from harbor.agents.grounding import (
+    dispatch_prices_from_context,
     ground_cards,
     search_evidence_from_context,
     tool_results_since,
@@ -241,17 +243,20 @@ async def _with_pending_draft(
 _ORDER_ID = re.compile(r"\bord_[A-Za-z0-9_-]+")
 
 
-async def _order_flags(
+async def _order_facts(
     order_service: OrderService | None, buyer_id: str, text: str
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, frozenset[tuple[str, Decimal]]]:
     """Which order states the reply may legitimately claim (S11 L4 grounding).
 
     An id the model made up, or one belonging to another buyer, raises in
     ``get_order``; that claim stays ungrounded and the guard rewrites it.
+    The returned prices are the stored order totals: the reply may quote the
+    amount the database confirmed, not the one the model remembered.
     """
     if order_service is None:
-        return False, False
+        return False, False, frozenset()
     confirmed = cancelled = False
+    prices: set[tuple[str, Decimal]] = set()
     for order_id in set(_ORDER_ID.findall(text)):
         try:
             order, _request = await order_service.get_order(
@@ -259,11 +264,12 @@ async def _order_flags(
             )
         except Exception:  # noqa: BLE001 — an unknown order is an ungrounded claim
             continue
+        prices.add((order.currency, order.total))
         if order.status == "confirmed":
             confirmed = True
         elif order.status == "cancelled":
             cancelled = True
-    return confirmed, cancelled
+    return confirmed, cancelled, frozenset(prices)
 
 
 def _guard_output(
@@ -309,7 +315,7 @@ async def run_turn(
     called: ``run_turn`` demands structured output, and a plain-text refusal
     from inside the loop would be retried until the turn 502s.
     """
-    if store.guard is not None and not store.guard.budget.turn_allowed():
+    if store.guard is not None and not await store.guard.budget.turn_allowed_async():
         store.guard.metrics.incr("budget.exhausted")
         log_guard_event("budget.exhausted", reason="turn_fallback")
         return CommerceIntentResponse(final_text=store.guard.rule_fallback_text(), cards=[])
@@ -388,14 +394,19 @@ async def run_turn(
                 guarded_cards: list[ProductCard] = grounded
                 if store.guard is not None:
                     evidence = search_evidence_from_context(session.agent.state.context)
-                    prices = frozenset(
-                        (item.currency, item.unit_price) for item in evidence
-                    )
                     reply_text = " ".join(
                         [cards.summary, *(h for card in grounded for h in card.highlights)]
                     )
-                    confirmed, cancelled = await _order_flags(
+                    confirmed, cancelled, order_prices = await _order_facts(
                         order_service, buyer_id, reply_text
+                    )
+                    # One fact set from three real sources: this session's
+                    # searches, the child agents' verified refs, and the
+                    # stored order rows the reply refers to.
+                    prices = frozenset(
+                        {(item.currency, item.unit_price) for item in evidence}
+                        | dispatch_prices_from_context(session.agent.state.context)
+                        | order_prices
                     )
                     summary, guarded_cards = _guard_output(
                         store.guard,

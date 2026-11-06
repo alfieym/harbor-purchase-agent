@@ -41,3 +41,29 @@ def test_event_fields_are_whitelisted(caplog) -> None:
     record = caplog.records[-1]
     assert record.guard["raw"] is None  # 非白名单字段被丢弃
     assert record.guard["model"] == "lite-1"
+
+
+def test_guard_payload_reaches_the_log_line() -> None:
+    import io
+    import logging
+
+    from harbor.core.logging import GuardPayloadFormatter
+    from harbor.guardrails.events import log_guard_event
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(GuardPayloadFormatter("%(levelname)s %(message)s"))
+    logger = logging.getLogger("harbor.guardrails.events")
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    try:
+        log_guard_event("model.fallback", model="backup", reason="circuit_open")
+        handler.flush()
+    finally:
+        logger.removeHandler(handler)
+        logger.propagate = True
+
+    rendered = stream.getvalue()
+    assert '"reason": "circuit_open"' in rendered
+    assert '"model": "backup"' in rendered

@@ -100,15 +100,15 @@ class GuardedChatModel(ChatModelBase):
         index = 1 if prepared and getattr(prepared[0], "role", None) == "system" else 0
         return prepared[:index] + [hint] + prepared[index:]
 
-    def _settle(self, admission: Admission, response: ChatResponse) -> None:
+    async def _settle(self, admission: Admission, response: ChatResponse) -> None:
         usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
         if usage is None:
-            self.runtime.budget.settle(admission.reserved, admission.reserved)
+            await self.runtime.budget.settle_async(admission.reserved, admission.reserved)
             return
         actual = int(getattr(usage, "input_tokens", 0) or 0) + int(
             getattr(usage, "output_tokens", 0) or 0
         )
-        self.runtime.budget.settle(admission.reserved, actual)
+        await self.runtime.budget.settle_async(admission.reserved, actual)
 
     def _fallback_event(self, name: str, reason: str, tier: BudgetTier | None = None) -> None:
         self.runtime.metrics.incr("model.fallback")
@@ -133,7 +133,7 @@ class GuardedChatModel(ChatModelBase):
         tool_choice: Any = None,
         **kwargs: Any,
     ) -> ChatResponse:
-        tier = self.runtime.budget.tier()
+        tier = await self.runtime.budget.tier_async()
         if tier is BudgetTier.FALLBACK:
             # The turn-level gate should have caught this already; if it did
             # not, still refuse rather than send a doomed request.
@@ -162,7 +162,7 @@ class GuardedChatModel(ChatModelBase):
                 skipped_for_circuit = True
                 log_guard_event("circuit.skip", model=name, reason="circuit_open")
                 continue
-            admission = self.runtime.budget.acquire(estimate)
+            admission = await self.runtime.budget.acquire_async(estimate)
             if not admission.granted:
                 raise self._exhausted("acquire_refused")
             if index > 0 or skipped_for_circuit:
@@ -181,11 +181,11 @@ class GuardedChatModel(ChatModelBase):
                         timeout=self.request_timeout,
                     )
                 except asyncio.CancelledError:
-                    self.runtime.budget.release(admission.reserved)
+                    await self.runtime.budget.release_async(admission.reserved)
                     raise
                 except Exception as exc:  # noqa: BLE001 - classified below
                     if not _retryable(exc):
-                        self.runtime.budget.release(admission.reserved)
+                        await self.runtime.budget.release_async(admission.reserved)
                         raise
                     if attempt < self._max_retries:
                         self.runtime.metrics.incr("model.retry")
@@ -193,12 +193,12 @@ class GuardedChatModel(ChatModelBase):
                         if self._backoff:
                             await asyncio.sleep(self._backoff * (2**attempt))
                         continue
-                    self.runtime.budget.release(admission.reserved)
+                    await self.runtime.budget.release_async(admission.reserved)
                     self.runtime.circuits.record_failure(name)
                     last_error = exc
                     break
                 else:
-                    self._settle(admission, response)
+                    await self._settle(admission, response)
                     self.runtime.circuits.record_success(name)
                     return response
 

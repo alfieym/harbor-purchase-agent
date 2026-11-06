@@ -1,6 +1,8 @@
 """S11-16/20: run_turn gates on budget, resets the window, guards the reply."""
 
 import asyncio
+import json
+from decimal import Decimal
 
 from agentscope.message import Msg, TextBlock
 
@@ -88,3 +90,65 @@ def test_turn_resets_loop_window(tmp_path) -> None:
     assert first.final_text
     assert second.final_text
     assert agent.replies == 2
+
+
+class _OrderService:
+    async def get_order(self, *, order_id: str, buyer_id: str):
+        from types import SimpleNamespace
+        from decimal import Decimal
+
+        return (
+            SimpleNamespace(status="confirmed", currency="CNY", total=Decimal("217.00")),
+            None,
+        )
+
+
+class _SummaryAgent:
+    def __init__(self, summary: str) -> None:
+        self.state = _State()
+        self.summary = summary
+
+    async def reply(self, msg, structured_schema=None):
+        result = _reply(self.summary)
+        self.state.context.append(result)
+        return result
+
+
+def test_order_total_and_status_ground_the_reply(tmp_path) -> None:
+    guard = _guard(tmp_path)
+    agent = _SummaryAgent("订单已创建，订单号 ord_123，总额 ¥217")
+    store = SessionStore(agent_factory=lambda state=None: agent, guard=guard)
+
+    response = asyncio.run(
+        run_turn(store, "b1", "s1", "确认", timeout_seconds=5, order_service=_OrderService())
+    )
+
+    assert "¥217" in response.final_text
+    assert "订单已创建" in response.final_text
+
+
+def test_dispatch_price_refs_are_grounded() -> None:
+    from agentscope.message import ToolResultBlock, ToolResultState
+
+    from harbor.agents.grounding import dispatch_prices_from_context
+
+    payload = {
+        "results": [
+            {
+                "ok": True,
+                "evidence_refs": [
+                    {"field": "price_major", "value": 217, "verified": True},
+                    {"field": "price_major", "value": 999, "verified": False},
+                ],
+            }
+        ]
+    }
+    block = ToolResultBlock(
+        id="call-1",
+        name="task_dispatch",
+        output=[TextBlock(type="text", text=json.dumps(payload, ensure_ascii=False))],
+        state=ToolResultState.SUCCESS,
+    )
+    context = [Msg(name="purchase_agent", role="assistant", content=[block])]
+
+    assert dispatch_prices_from_context(context) == frozenset({("CNY", Decimal("217"))})

@@ -8,6 +8,7 @@ so two threads cannot oversell the same day.
 
 from __future__ import annotations
 
+import asyncio
 import math
 import sqlite3
 from collections.abc import Callable, Sequence
@@ -135,6 +136,30 @@ class SqliteTokenBudget:
 
     def turn_allowed(self) -> bool:
         return self.tier() is not BudgetTier.FALLBACK
+
+    # ------------------------------------------------------------ async API
+    # Every caller below this line runs on the event loop. sqlite3 is
+    # blocking, and ``BEGIN IMMEDIATE`` can wait up to ``timeout`` for another
+    # turn's write, so the sync methods go through a thread: one slow budget
+    # write must not freeze every other session in the process.
+
+    async def used_today_async(self) -> int:
+        return await asyncio.to_thread(self.used_today)
+
+    async def tier_async(self) -> BudgetTier:
+        return await asyncio.to_thread(self.tier)
+
+    async def turn_allowed_async(self) -> bool:
+        return await asyncio.to_thread(self.turn_allowed)
+
+    async def acquire_async(self, estimated_tokens: int) -> Admission:
+        return await asyncio.to_thread(self.acquire, estimated_tokens)
+
+    async def settle_async(self, reserved: int, actual: int) -> None:
+        await asyncio.to_thread(self.settle, reserved, actual)
+
+    async def release_async(self, reserved: int) -> None:
+        await asyncio.to_thread(self.release, reserved)
 
     def estimate(self, messages: Sequence[Any]) -> int:
         chars = sum(len(_message_text(message)) for message in messages)
