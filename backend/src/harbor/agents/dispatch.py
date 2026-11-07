@@ -507,6 +507,8 @@ class AgentSubAgentRunner:
                     session=guard_session,
                     metrics=self._guard.metrics,
                     max_chars=self._guard.tool_output_max_chars,
+                    switches=self._guard.switches,
+                    circuits=self._guard.tool_circuits,
                 ),
             )
         agent = Agent(

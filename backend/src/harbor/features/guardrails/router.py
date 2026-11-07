@@ -19,11 +19,15 @@ def guard_status(request: Request) -> dict[str, Any]:
         return {"enabled": False, "budget": {}, "circuits": {}, "metrics": {}}
     return {
         "enabled": True,
+        # S11-8: an operator must be able to tell "the guardrail fired" from
+        # "someone turned it off", so the applied switches are part of status.
+        "switches": guard.switches.as_dict(),
         "budget": {
             "used": guard.budget.used_today(),
             "cap": guard.budget.daily_cap,
             "tier": guard.budget.tier().value,
         },
         "circuits": guard.circuits.snapshot(),
+        "tool_circuits": guard.tool_circuits.snapshot(),
         "metrics": guard.metrics.snapshot(),
     }

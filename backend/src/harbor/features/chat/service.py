@@ -315,7 +315,11 @@ async def run_turn(
     called: ``run_turn`` demands structured output, and a plain-text refusal
     from inside the loop would be retried until the turn 502s.
     """
-    if store.guard is not None and not await store.guard.budget.turn_allowed_async():
+    if (
+        store.guard is not None
+        and store.guard.switches.budget
+        and not await store.guard.budget.turn_allowed_async()
+    ):
         store.guard.metrics.incr("budget.exhausted")
         log_guard_event("budget.exhausted", reason="turn_fallback")
         return CommerceIntentResponse(final_text=store.guard.rule_fallback_text(), cards=[])
@@ -378,7 +382,7 @@ async def run_turn(
                     # S11 structural assertion: the reply carries no
                     # ``ProductCardList``. Counted, then failed exactly as S5
                     # did — a missing structured reply must stay a 502.
-                    if store.guard is not None:
+                    if store.guard is not None and store.guard.switches.structure:
                         store.guard.metrics.incr("reply.assertion_failed")
                         log_guard_event(
                             "reply.assertion_failed", reason="no_structured_output"
@@ -392,7 +396,7 @@ async def run_turn(
                 # buyer — and before ``persist`` journals what was shown.
                 summary = cards.summary
                 guarded_cards: list[ProductCard] = grounded
-                if store.guard is not None:
+                if store.guard is not None and store.guard.switches.output_guard:
                     evidence = search_evidence_from_context(session.agent.state.context)
                     reply_text = " ".join(
                         [cards.summary, *(h for card in grounded for h in card.highlights)]

@@ -112,8 +112,20 @@ class Settings(BaseSettings):
     evidence_retention_days: int = Field(default=30, ge=1)
 
     # S11: guardrails. The kill switch disables all ten behaviours and returns
-    # the system to its S10 semantics.
+    # the system to its S10 semantics. Each behaviour also has its own switch
+    # (S11-8): turning one off restores that behaviour's pre-S11 baseline and
+    # leaves the other nine running.
     guardrails_enabled: bool = True
+    guard_timeout_enabled: bool = True
+    guard_retry_enabled: bool = True
+    guard_circuit_enabled: bool = True
+    guard_fallback_enabled: bool = True
+    guard_budget_enabled: bool = True
+    guard_loop_enabled: bool = True
+    guard_sequence_enabled: bool = True
+    guard_structure_enabled: bool = True
+    guard_content_filter_enabled: bool = True
+    guard_output_guard_enabled: bool = True
     guard_request_timeout_seconds: float = Field(default=20.0, gt=0)
     guard_max_retries: int = Field(default=1, ge=0)
     guard_retry_backoff_seconds: float = Field(default=0.5, ge=0)

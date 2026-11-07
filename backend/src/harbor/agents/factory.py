@@ -251,6 +251,8 @@ def build_agent(
                 session=guard_session,
                 metrics=runtime.guard.metrics,
                 max_chars=settings.guard_tool_output_max_chars,
+                switches=runtime.guard.switches,
+                circuits=runtime.guard.tool_circuits,
             )
         )
 

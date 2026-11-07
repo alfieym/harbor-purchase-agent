@@ -1,0 +1,697 @@
+<title>S11 护栏与可靠性</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  /* S11 flow — the same paper-and-teal system as the S3/S4/S9/S10 pages. */
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C; --accent-soft: #E3F1EE;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --warn: #9A6700; --warn-soft: #FBF1DC;
+    --soft: #3353A6; --soft-soft: #EAF0FB;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --warn: #E0A63C; --warn-soft: #33270F;
+      --soft: #8FB0E8; --soft-soft: #182238;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --warn: #E0A63C; --warn-soft: #33270F;
+    --soft: #8FB0E8; --soft-soft: #182238;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(56px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header { margin-bottom: 18px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 78ch; }
+  .sub b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.accent { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+  .chip.soft { border-color: var(--soft); color: var(--soft); }
+  .chip.bad { border-color: var(--bad); color: var(--bad); }
+
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 14px 16px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .flow-step { display: flex; flex-direction: column; align-items: center; min-width: 96px; padding: 2px 8px; text-align: center; }
+  .fidx { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); }
+  .fname { font-size: 14px; font-weight: 600; }
+  .fcount { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); text-align: center; }
+  .flow-link { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--faint); }
+  .farrow { font-size: 18px; line-height: 1; }
+  .fwhat { font-size: 11px; color: var(--muted); font-family: "IBM Plex Mono", monospace; max-width: 130px; text-align: center; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+
+  .mhead { margin: 34px 0 4px; font-size: 19px; font-weight: 700; text-wrap: balance; }
+  .msub { color: var(--muted); font-size: 13px; margin: 0 0 14px; max-width: 82ch; }
+  .msub b { color: var(--fg); }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  /* --- 泳道流程图 --- */
+  figure { margin: 0; }
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; height: auto; min-width: 760px; }
+  figcaption { font-size: 12.5px; color: var(--muted); margin-top: 8px; padding-left: 2px; max-width: 82ch; }
+  figcaption b { color: var(--fg); }
+  .lane-label { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--muted); letter-spacing: .04em; }
+  .lane-sub { font-size: 10px; fill: var(--faint); }
+  .box-title { font-size: 12.5px; font-weight: 600; fill: var(--fg); }
+  .box-title.bad { fill: var(--bad); }
+  .box-title.good { fill: var(--good); }
+  .box-sub { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--muted); }
+  .box-sub-accent { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--accent-ink); }
+  .edge-label { font-size: 10px; fill: var(--muted); }
+
+  /* --- 状态机 --- */
+  .machines { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .machine { display: grid; grid-template-columns: 112px 106px 1fr; gap: 14px; align-items: start; justify-items: start; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .machine-name { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .06em; color: var(--muted); padding-top: 7px; }
+  .branches { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .branch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .st { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); white-space: nowrap; }
+  .st.start { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+  .st.end { color: var(--muted); }
+  .st.stop { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }
+  .pa { font-size: 15px; line-height: 1; color: var(--faint); }
+  .pl { font-size: 11.5px; color: var(--muted); }
+
+  /* --- 表格 --- */
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .trow { display: grid; grid-template-columns: 1.1fr 1fr 118px; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .trow:last-child { border-bottom: 0; }
+  .trow.head { background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .cell { font-family: "IBM Plex Mono", monospace; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+  .cell.plain { font-family: "IBM Plex Sans", sans-serif; font-size: 12.5px; color: var(--muted); }
+  .cell.plain b { color: var(--fg); }
+  .tstat { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; text-align: center; white-space: nowrap; }
+  .tstat.pass { color: var(--good); background: var(--good-soft); }
+  .tstat.fail { color: var(--bad); background: var(--bad-soft); }
+  .tstat.no { color: var(--bad); background: var(--bad-soft); }
+  .tstat.yes { color: var(--good); background: var(--good-soft); }
+  .tstat.partial { color: var(--warn); background: var(--warn-soft); }
+  .atbl .trow { grid-template-columns: 72px 1.25fr 72px 1.55fr; align-items: start; }
+  .atbl .tstat { justify-self: start; margin-top: 1px; }
+  .atbl .cell.plain { color: var(--fg); }
+  .atbl .cell.evi { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); overflow-wrap: break-word; word-break: normal; }
+  .atbl .cell.evi .mono { color: var(--fg); }
+
+  .ttbl .trow { grid-template-columns: .9fr .55fr 1fr 1.5fr; }
+  .etbl .trow { grid-template-columns: 1.1fr .7fr 1.7fr; }
+  .ttbl .tstat, .etbl .tstat { justify-self: start; }
+
+  /* --- 通用面板 --- */
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .panel h3 { margin: 0; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .panel p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .panel p b { color: var(--fg); }
+
+  .badge { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px dashed; letter-spacing: .03em; white-space: nowrap; }
+  .badge.ok { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .badge.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .badge.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+
+  .call { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; margin: 0; line-height: 1.6; }
+
+  /* --- 手动走一遍 --- */
+  .sim { display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 820px) { .sim { grid-template-columns: 1fr; } }
+  .sim-actions { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 9px; }
+  .sim-actions h3 { margin: 0 0 2px; font-size: 13.5px; }
+  .sim-grp { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
+  .sim-range { width: 100%; accent-color: var(--accent); }
+  .sim-readout { display: flex; justify-content: space-between; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); }
+  .sim-btn { font-family: inherit; font-size: 12.5px; text-align: left; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--fg); cursor: pointer; }
+  .sim-btn:hover { border-color: var(--accent); }
+  .sim-btn.ghost { border-style: dashed; color: var(--muted); }
+  .sim-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sim-k { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted); margin-left: 6px; }
+  .sim-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .sim-states { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sim-state { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; background: var(--surface-2); }
+  .sim-key { font-size: 11px; color: var(--muted); }
+  .sim-chip { font-family: "IBM Plex Mono", monospace; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+  .sim-chip.none { color: var(--faint); border-style: dashed; }
+  .sim-chip.pending { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .sim-chip.good { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .sim-chip.end { color: var(--muted); }
+  .sim-msg { font-size: 12.5px; color: var(--muted); margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); min-height: 38px; }
+  .sim-msg.ok { color: var(--fg); border-left: 3px solid var(--accent); }
+  .sim-msg.err { color: var(--bad); border-left: 3px solid var(--bad); background: var(--bad-soft); }
+  .sim-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+  .ev { display: flex; justify-content: space-between; gap: 10px; font-family: "IBM Plex Mono", monospace; font-size: 11px; padding: 4px 8px; border-radius: 6px; background: var(--surface-2); }
+  .ev.empty { color: var(--faint); justify-content: flex-start; }
+  .ev-meta { color: var(--muted); white-space: nowrap; }
+
+  .note { margin-top: 16px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { gap: 2px; padding: 12px 8px; }
+    .flow-step { min-width: 0; padding: 2px 4px; }
+    .farrow { font-size: 15px; }
+    .trow, .ttbl .trow, .etbl .trow, .atbl .trow { grid-template-columns: 1fr; gap: 4px; }
+    .trow.head { display: none; }
+    .tstat { justify-self: start; }
+    .machine { grid-template-columns: 1fr; gap: 8px; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Purchase Agent · S11</p>
+    <h1>一路护栏，两道闸门</h1>
+    <p class="sub">S11 不改变 Agent 做什么，只规定它<b>做不成时怎么办</b>。模型对象和每个工具各套一层代理：调用层管超时、重试、熔断、回退与预算；工具层管循环、顺序和外来文本；回复出门前再过一次结构断言与 L4 审核。预算耗尽时，连请求都不发。</p>
+    <div class="chips">
+      <span class="chip accent">GuardedChatModel</span>
+      <span class="chip accent">GuardedTool</span>
+      <span class="chip">每日 500k tokens · 全局一份</span>
+      <span class="chip soft">L3 只过滤工具输出</span>
+      <span class="chip bad">≤5% 不发起请求</span>
+      <span class="chip good">559 passed</span>
+    </div>
+
+    <div class="flow" aria-label="S11 流程">
+      <div class="flow-step"><span class="fidx">①</span><span class="fname">轮级闸门</span><span class="fcount">turn_allowed</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">够不够开场</span></div>
+      <div class="flow-step"><span class="fidx">②</span><span class="fname">选模型</span><span class="fcount">tier · lite</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">降档换模型</span></div>
+      <div class="flow-step"><span class="fidx">③</span><span class="fname">熔断 + 预留</span><span class="fcount">circuit · acquire</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">先问再花</span></div>
+      <div class="flow-step"><span class="fidx">④</span><span class="fname">调用</span><span class="fcount">timeout · retry</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">失败分类</span></div>
+      <div class="flow-step"><span class="fidx">⑤</span><span class="fname">工具</span><span class="fcount">loop · sequence · L3</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">拒绝也返回 ok=false</span></div>
+      <div class="flow-step"><span class="fidx">⑥</span><span class="fname">出门审核</span><span class="fcount">结构断言 · L4</span></div>
+    </div>
+    <p class="hint">先看泳道图：模型这一层是唯一会花钱的地方，所以三道判断（熔断、额度、超时）都排在真正发起请求之前。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2 class="mhead">两道闸门，一个出口</h2>
+  <p class="msub">横轴是时间，纵轴是层次。<b>接入层</b>先决定这一轮还值不值得开始；<b>模型层</b>在每次真实调用前判断熔断与额度，再管超时和重试；<b>工具层</b>在工具真正执行前拦截循环与顺序违规，并在结果回到模型之前做 L3；<b>输出层</b>只在最终回复出门时出现一次。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 760" role="img" aria-label="S11 护栏泳道图。接入层的 run_turn 先检查 turn_allowed，额度不足直接返回固定兜底文案，不发起任何模型请求。模型层先判定预算档位，选择主模型或 lite 模型，再检查熔断器是否允许调用，随后在 SQLite 里预留 token，最后带超时调用 delegate；可重试错误按指数退避重试，成功则结算预留，重试耗尽或不可重试则记录熔断失败并尝试候选链上的下一个模型。工具层在真正执行前检查循环与顺序规则，被拒绝时返回 SUCCESS 加 ok=false；执行后对工具输出做 L3 内容过滤，JSON 逐叶清洗后原样交回模型。输出层在回复返回后先做结构断言，再汇总价格事实集，交给 L4 输出审核修掉未证实的价格、完成声明和内部标识，最后持久化。">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+          <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+          </marker>
+          <marker id="arr-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--bad)"/>
+          </marker>
+        </defs>
+
+        <!-- lanes -->
+        <rect x="0" y="24" width="1000" height="120" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <rect x="0" y="156" width="1000" height="216" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <rect x="0" y="384" width="1000" height="172" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <rect x="0" y="568" width="1000" height="164" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="48">接入层</text>
+        <text class="lane-sub" x="14" y="62">run_turn</text>
+        <text class="lane-label" x="14" y="180">模型层</text>
+        <text class="lane-sub" x="14" y="194">GuardedChatModel</text>
+        <text class="lane-label" x="14" y="408">工具层</text>
+        <text class="lane-sub" x="14" y="422">GuardedTool</text>
+        <text class="lane-label" x="14" y="592">输出层</text>
+        <text class="lane-sub" x="14" y="606">OutputGuard</text>
+
+        <!-- lane A: turn -->
+        <rect x="90" y="52" width="210" height="64" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="76">① 轮级闸门</text>
+        <text class="box-sub" x="104" y="94">budget.turn_allowed()</text>
+        <text class="box-sub-accent" x="104" y="108">在线程里读 SQLite</text>
+
+        <rect x="350" y="52" width="210" height="64" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="364" y="76">② agent.reply(...)</text>
+        <text class="box-sub" x="364" y="94">会话锁 · begin_turn()</text>
+        <text class="box-sub" x="364" y="108">本轮循环窗口清零</text>
+
+        <rect x="610" y="52" width="180" height="64" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="624" y="76">⑦ persist</text>
+        <text class="box-sub" x="624" y="94">先审后存</text>
+        <text class="box-sub" x="624" y="108">日志记的是买家看到的</text>
+
+        <rect x="840" y="52" width="140" height="64" rx="10" fill="var(--bad-soft)" stroke="var(--bad)" stroke-dasharray="5 4"/>
+        <text class="box-title bad" x="854" y="76">固定兜底文案</text>
+        <text class="box-sub" x="854" y="94">rule_fallback_text</text>
+        <text class="box-sub" x="854" y="108">不发请求</text>
+
+        <!-- lane A edges -->
+        <line x1="300" y1="84" x2="348" y2="84" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <polyline points="195,52 195,36 910,36 910,50" fill="none" stroke="var(--bad)" stroke-dasharray="5 4" marker-end="url(#arr-bad)"/>
+        <text class="edge-label" x="560" y="31" text-anchor="middle">tier = fallback（剩余 ≤ 5%）</text>
+        <line x1="560" y1="84" x2="608" y2="84" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="584" y="76" text-anchor="middle">回复</text>
+
+        <!-- lane A -> lane B -->
+        <polyline points="455,116 455,146 175,146 175,186" fill="none" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <text class="edge-label" x="300" y="140" text-anchor="middle">进入本轮</text>
+
+        <!-- lane B row 1 -->
+        <rect x="90" y="186" width="170" height="72" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="210">③ 档位判定</text>
+        <text class="box-sub" x="104" y="228">remaining_ratio</text>
+        <text class="box-sub" x="104" y="244">main / lite / minimal</text>
+
+        <rect x="290" y="186" width="170" height="72" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="304" y="210">④ 选模型</text>
+        <text class="box-sub" x="304" y="228">lite_model?</text>
+        <text class="box-sub" x="304" y="244">候选链 = 选中 + fallback</text>
+
+        <rect x="490" y="186" width="170" height="72" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="504" y="210">⑤ 熔断检查</text>
+        <text class="box-sub" x="504" y="228">circuit.allow(name)</text>
+        <text class="box-sub" x="504" y="244">半开只放一个探针</text>
+
+        <rect x="690" y="186" width="200" height="72" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="704" y="210">⑥ 额度预留</text>
+        <text class="box-sub" x="704" y="228">acquire(estimate)</text>
+        <text class="box-sub-accent" x="704" y="244">BEGIN IMMEDIATE · 拒绝不扣</text>
+
+        <line x1="260" y1="222" x2="288" y2="222" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="460" y1="222" x2="488" y2="222" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="660" y1="222" x2="688" y2="222" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <!-- lane B row 2 -->
+        <rect x="690" y="282" width="200" height="70" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="704" y="306">⑦ 调用 delegate</text>
+        <text class="box-sub" x="704" y="324">wait_for(20s)</text>
+        <text class="box-sub" x="704" y="340">重试 ≤1 · 仅 429/5xx/超时</text>
+
+        <rect x="490" y="282" width="170" height="70" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="504" y="306">⑧ 结算</text>
+        <text class="box-sub" x="504" y="324">settle(usage)</text>
+        <text class="box-sub" x="504" y="340">失败则 release</text>
+
+        <rect x="290" y="282" width="170" height="70" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="304" y="306">候选链 +1</text>
+        <text class="box-sub" x="304" y="324">fallback_model</text>
+        <text class="box-sub" x="304" y="340">没有候选 → 熔断 +1</text>
+
+        <line x1="790" y1="258" x2="790" y2="280" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <line x1="688" y1="317" x2="662" y2="317" stroke="var(--good)" marker-end="url(#arr-accent)"/>
+        <text class="edge-label" x="675" y="309" text-anchor="middle">成功</text>
+        <polyline points="790,352 790,368 375,368 375,354" fill="none" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="590" y="362" text-anchor="middle">重试耗尽 / 不可重试 → record_failure</text>
+        <line x1="375" y1="282" x2="375" y2="260" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="383" y="274">换候选</text>
+
+        <!-- entry into the tool lane -->
+        <line x1="52" y1="461" x2="86" y2="461" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <text class="edge-label" x="50" y="449">每次 tool_call</text>
+
+        <!-- lane C -->
+        <rect x="90" y="428" width="170" height="66" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="452">① 循环检测</text>
+        <text class="box-sub" x="104" y="470">sha256(kwargs)</text>
+        <text class="box-sub" x="104" y="486">窗口 8 · 第 3 次拒绝</text>
+
+        <rect x="300" y="428" width="170" height="66" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="314" y="452">② 顺序断言</text>
+        <text class="box-sub" x="314" y="470">2 条默认规则</text>
+        <text class="box-sub" x="314" y="486">草稿 / 派发各一次</text>
+
+        <rect x="510" y="428" width="180" height="66" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="524" y="452">③ 熔断检查 + 执行</text>
+        <text class="box-sub" x="524" y="470">allow(name) · ERROR 计失败</text>
+        <text class="box-sub" x="524" y="486">通过后才写窗口</text>
+
+        <rect x="730" y="428" width="180" height="66" rx="10" fill="var(--soft-soft)" stroke="var(--soft)"/>
+        <text class="box-title" x="744" y="452">④ L3 内容过滤</text>
+        <text class="box-sub" x="744" y="470">JSON 逐叶清洗</text>
+        <text class="box-sub" x="744" y="486">非 JSON 加不可信边界</text>
+
+        <rect x="90" y="510" width="380" height="34" rx="8" fill="var(--bad-soft)" stroke="var(--bad)" stroke-dasharray="5 4"/>
+        <text class="box-sub" x="104" y="531">loop · sequence · circuit → blocked_chunk(ok=false)</text>
+
+        <line x1="260" y1="461" x2="298" y2="461" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="470" y1="461" x2="508" y2="461" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="690" y1="461" x2="728" y2="461" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="385" y1="494" x2="385" y2="508" stroke="var(--bad)" marker-end="url(#arr-bad)"/>
+        <text class="edge-label" x="393" y="506">拒绝</text>
+
+        <!-- lane C -> lane B (filtered result) -->
+        <polyline points="910,461 955,461 955,317 892,317" fill="none" stroke="var(--soft)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="948" y="392" text-anchor="end">tool_result ↑ 已过滤</text>
+
+        <!-- lane D -->
+        <line x1="52" y1="628" x2="86" y2="628" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <rect x="90" y="590" width="190" height="76" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="614">⑤ 结构断言</text>
+        <text class="box-sub" x="104" y="632">structured_output?</text>
+        <text class="box-sub" x="104" y="648">缺失 → 502 + 计数</text>
+
+        <rect x="310" y="590" width="190" height="76" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="324" y="614">⑥ 事实集</text>
+        <text class="box-sub" x="324" y="632">搜索价 ∪ 派发验证价</text>
+        <text class="box-sub" x="324" y="648">∪ get_order 总额</text>
+
+        <rect x="530" y="590" width="190" height="76" rx="10" fill="var(--soft-soft)" stroke="var(--soft)"/>
+        <text class="box-title" x="544" y="614">⑦ L4 输出审核</text>
+        <text class="box-sub" x="544" y="632">8 条规则 · 修而不拒</text>
+        <text class="box-sub" x="544" y="648">价格/完成声明/泄露</text>
+
+        <rect x="750" y="590" width="190" height="76" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="764" y="614">⑧ 回复买家</text>
+        <text class="box-sub" x="764" y="632">final_text + cards</text>
+        <text class="box-sub" x="764" y="648">卡片亮点同样过审</text>
+
+        <line x1="280" y1="628" x2="308" y2="628" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="500" y1="628" x2="528" y2="628" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="720" y1="628" x2="748" y2="628" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <!-- lane D -> persist -->
+        <polyline points="845,590 845,560 985,560 985,20 742,20 742,50" fill="none" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="978" y="520" text-anchor="end">先审后存</text>
+      </svg>
+    </div>
+    <figcaption><b>两个插入点，覆盖所有调用方：</b>模型代理在 <span class="mono">build_runtime</span> 里套一次，主 Agent、S9 子 Agent、S7 摘要调用共用同一个；工具代理在拼 <span class="mono">Toolkit</span> 时逐个套上。所以子 Agent 不需要知道护栏存在，也躲不开它。<b>拒绝不是错误：</b>工具层的拦截返回 <span class="mono">SUCCESS + ok=false</span>，和 S10 的业务拒绝同形，模型能看懂并改口；只有预算耗尽和结构断言失败会让整轮失败。</figcaption>
+  </figure>
+
+  <h2 class="mhead">4 个预算档位</h2>
+  <p class="msub">预算是<b>按天、按 token、全进程一份</b>的池子，不是每会话配额。档位只看一个数：剩余比例。低于 5% 时，<span class="mono">run_turn</span> 在 Agent 之前就返回文案——结构化输出的重试会让一条"拒绝"在循环里反复失败，最终 502。</p>
+
+  <div class="tbl ttbl" role="table" aria-label="S11 预算档位">
+    <div class="trow head" role="row"><span>剩余额度</span><span>档位</span><span>用哪个模型</span><span>这一档多做的事</span></div>
+    <div class="trow" role="row">
+      <span class="cell">&gt; 50%</span>
+      <span class="tstat yes">main</span>
+      <span class="cell plain">调用方传进来的原模型</span>
+      <span class="cell plain">不额外加提示，不记降级事件</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">20% – 50%</span>
+      <span class="tstat yes">lite</span>
+      <span class="cell plain"><b>lite_model</b>（未配置则仍是原模型）</span>
+      <span class="cell plain">每次实际模型与预设不一致时发 <span class="mono">model.fallback</span>，reason=<span class="mono">budget_tier_lite</span></span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">5% – 20%</span>
+      <span class="tstat yes">minimal</span>
+      <span class="cell plain"><b>lite_model</b></span>
+      <span class="cell plain">在系统提示后插入 <span class="mono">MINIMAL_MODE_HINT</span>：最多再检索一次，直接简洁作答</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">≤ 5%</span>
+      <span class="tstat no">fallback</span>
+      <span class="cell plain"><b>不发任何请求</b></span>
+      <span class="cell plain">轮级返回固定文案；调用级若漏网则 <span class="mono">BudgetExhausted</span>，同样不发请求</span>
+    </div>
+  </div>
+  <div class="note"><b>两阶段记账。</b><span class="mono">acquire</span> 先按 <span class="mono">ceil(chars / 2.0 × 1.2)</span> 预留，成功后用 provider 报的 <span class="mono">input_tokens + output_tokens</span> 结算，失败或取消则整笔退回。重试不重新预留，所以重试不会被重复计费；被拒绝的 <span class="mono">acquire</span> 一分不扣。存储写不进去时<b>快速失败开放</b>：记一次 <span class="mono">budget.unavailable</span>，之后不再拦任何人。</div>
+
+  <h2 class="mhead">熔断按名字分开记，模型和工具各用一套</h2>
+  <p class="msub">同一个状态机用两次：模型面按<b>模型名</b>计数，工具面按<b>工具名</b>计数（独立实例，<span class="mono">kind="tool"</span>）。主模型挂了不连坐 lite 模型，一个工具坏了也不连坐其他工具，更不会把模型降档。半开状态只放一个探针，其余调用继续走下一个候选。</p>
+
+  <div class="machines">
+    <div class="machine">
+      <span class="machine-name">circuit</span>
+      <span class="st start">closed</span>
+      <span class="branches">
+        <span class="branch"><span class="pa">→</span><span class="st stop">open</span><span class="pl">连续 3 次可重试失败（默认阈值）</span></span>
+        <span class="branch"><span class="pa">→</span><span class="st end">half_open</span><span class="pl">冷却 60s 后，第一个调用拿到探针</span></span>
+        <span class="branch"><span class="pa">→</span><span class="st start">closed</span><span class="pl">探针成功：清零失败数，发 <span class="mono">circuit.close</span></span></span>
+        <span class="branch"><span class="pa">→</span><span class="st stop">open</span><span class="pl">探针再失败：重新计时，所有调用继续跳过</span></span>
+      </span>
+    </div>
+  </div>
+  <p class="msub"><b>什么算可重试：</b>超时、连接错误、429、5xx。其余错误（400/401/422…）立即释放预留并向上抛，不计熔断失败——重试一次只会得到同样的答案。超时用 <span class="mono">asyncio.wait_for</span> 包住单次请求；配置校验保证 <span class="mono">request_timeout × (max_retries + 1) &lt; turn_timeout</span>，否则重试还没走完，整轮先超时。</p>
+  <p class="msub"><b>工具面什么算失败：</b>只有 <span class="mono">ToolResultState.ERROR</span>（含工具抛异常）计数。业务拒绝是 <span class="mono">SUCCESS + ok=false</span>——那是工具<b>按设计</b>在工作，不熔断。熔断打开后，调用不再执行，模型收到 <span class="mono">ok=false · circuit_open</span> 的收敛提示，可以换工具或直接回答。</p>
+
+  <h2 class="mhead">谁在什么通道上被检查</h2>
+  <p class="msub">L3 管「别人的话进我的脑子」，L4 管「我的话说给买家听」。工具参数是「我自己决定要做的事」，归 S4 白名单、S10 业务校验和 schema，不归 L3/L4。</p>
+
+  <div class="twocol">
+    <div class="panel">
+      <h3>L3 · 工具输出 <span class="badge ok">注入过滤</span></h3>
+      <pre class="call">_CONTROL     控制字符、零宽字符
+_ROLE        &lt;|im_start|&gt;、[INST]、
+             "system:"、"### system"
+_INSTRUCTION ignore previous instructions
+             忽略之前的指令、你现在是
+             系统提示
+
+命中后：
+  JSON  → 只清洗字符串叶子，
+          结构原样返回（grounding 还能 loads）
+  非JSON → &lt;untrusted-tool-output&gt;
+           …包起来
+  超长   → 8000 字符截断</pre>
+      <p>这是<b>唯一</b>需要注入过滤的通道：工具结果就是别人的文字第一次进入模型上下文。用户消息只做长度、频率、身份检查；偏好写入走应用层审批。</p>
+    </div>
+    <div class="panel">
+      <h3>L4 · 最终回复 <span class="badge warn">修而不拒</span></h3>
+      <pre class="call">empty              空回复 → 固定文案
+unrendered_marker  &lt;tool_call&gt; 等残留
+json_block_invalid 代码块里的 JSON 坏了
+too_long           &gt; 4000 字符截断
+internal_id        Traceback / harbor. / draft_id=
+ungrounded_price   价格不在事实集里 →
+                   〔价格以确认页为准〕
+completion_claim   无订单却说"已下单"
+overclaim          "保证明天到货" → 以页面为准</pre>
+      <p>顺序固定：先删标记，再修 JSON 块，再截断，再删内部句，再核价格与完成声明，最后软化绝对化措辞。卡片 <span class="mono">highlights</span> 走同一套规则。</p>
+    </div>
+  </div>
+
+  <h2 class="mhead">事件与计数</h2>
+  <p class="msub">日志只写白名单字段：<span class="mono">event · tier · model · reason · rule · tool · count · session_id</span>。消息正文、工具输出、模型输出永远不进日志。计数器通过 <span class="mono">GET /api/guardrails/status</span> 暴露。</p>
+
+  <div class="tbl etbl" role="table" aria-label="S11 事件与计数器">
+    <div class="trow head" role="row"><span>事件</span><span>计数器</span><span>什么时候发</span></div>
+    <div class="trow" role="row"><span class="cell">model.retry</span><span class="tstat yes">+1</span><span class="cell plain">同一模型第 n 次重试，带 <span class="mono">count</span></span></div>
+    <div class="trow" role="row"><span class="cell">model.fallback</span><span class="tstat yes">+1</span><span class="cell plain">降档换模型、熔断跳过、重试耗尽换候选——reason 区分三者</span></div>
+    <div class="trow" role="row"><span class="cell">circuit.open / close</span><span class="tstat yes">+1</span><span class="cell plain">失败数达阈值 / 半开探针成功——模型面带 <span class="mono">model</span>，工具面带 <span class="mono">tool</span></span></div>
+    <div class="trow" role="row"><span class="cell">circuit.skip</span><span class="tstat no">—</span><span class="cell plain">候选模型或工具被熔断跳过，只进日志</span></div>
+    <div class="trow" role="row"><span class="cell">tool.loop_blocked</span><span class="tstat yes">+1</span><span class="cell plain">相同工具 + 相同参数第 3 次</span></div>
+    <div class="trow" role="row"><span class="cell">tool.sequence_blocked</span><span class="tstat yes">+1</span><span class="cell plain">本轮已建过草稿 / 已派发过子任务</span></div>
+    <div class="trow" role="row"><span class="cell">tool.structure_anomaly</span><span class="tstat no">—</span><span class="cell plain">成功 payload 缺约定字段（如 <span class="mono">hits</span>），提示写回 payload，只进日志</span></div>
+    <div class="trow" role="row"><span class="cell">content.filtered</span><span class="tstat yes">+n</span><span class="cell plain">L3 命中规则，按命中条数计数</span></div>
+    <div class="trow" role="row"><span class="cell">output.guarded</span><span class="tstat yes">+n</span><span class="cell plain">L4 改写了回复或卡片亮点</span></div>
+    <div class="trow" role="row"><span class="cell">reply.assertion_failed</span><span class="tstat yes">+1</span><span class="cell plain">回复没有 <span class="mono">ProductCardList</span>，随后照旧 502</span></div>
+    <div class="trow" role="row"><span class="cell">budget.exhausted</span><span class="tstat yes">+1</span><span class="cell plain">轮级拒绝、调用级拒绝、全部候选熔断</span></div>
+    <div class="trow" role="row"><span class="cell">budget.unavailable</span><span class="tstat no">—</span><span class="cell plain">额度库打不开，只记一次然后 fail-open</span></div>
+  </div>
+
+  <h2 class="mhead">手动走一遍</h2>
+  <p class="msub">拖动剩余额度看档位怎么变；按钮模拟一次熔断、一次循环和一次编造价格。日志里的名字就是真实的事件名。</p>
+
+  <div class="sim">
+    <div class="sim-actions">
+      <h3>预算与场景</h3>
+      <div class="sim-readout"><span>已用</span><span id="used-label">0%</span></div>
+      <input class="sim-range" id="used" type="range" min="0" max="100" value="0" step="1" aria-label="今日已用额度百分比">
+      <div class="sim-readout"><span>剩余</span><span id="left-label">100%</span></div>
+      <span class="sim-grp">模型层</span>
+      <button class="sim-btn" data-act="fail">模拟 3 次 500 <span class="sim-k">circuit.open</span></button>
+      <button class="sim-btn" data-act="probe">冷却结束，探测一次 <span class="sim-k">half_open</span></button>
+      <span class="sim-grp">工具层</span>
+      <button class="sim-btn" data-act="loop">第 3 次相同搜索 <span class="sim-k">loop_blocked</span></button>
+      <button class="sim-btn" data-act="seq">本轮第二次派发 <span class="sim-k">sequence_blocked</span></button>
+      <span class="sim-grp">输出层</span>
+      <button class="sim-btn" data-act="price">回复编造 ¥1999 <span class="sim-k">L4</span></button>
+      <button class="sim-btn ghost" data-act="reset">重置</button>
+    </div>
+    <div class="sim-panel">
+      <div class="sim-states" aria-live="polite">
+        <div class="sim-state"><span class="sim-key">档位</span><span id="st-tier"></span></div>
+        <div class="sim-state"><span class="sim-key">模型</span><span id="st-model"></span></div>
+        <div class="sim-state"><span class="sim-key">熔断</span><span id="st-circuit"></span></div>
+        <div class="sim-state"><span class="sim-key">本轮调用</span><span id="st-calls"></span></div>
+      </div>
+      <p class="sim-msg" id="sim-msg"></p>
+      <ul class="sim-log" id="sim-log" aria-label="事件日志"></ul>
+    </div>
+  </div>
+
+  <h2 class="mhead">S11 验收 8 条</h2>
+  <p class="msub">按交付口径的 8 条验收（spec §12 的 20 条是更细的拆分，二者不冲突）。「证据」列是对着当前代码逐条核对的结论，不是按设计文档推断的。全部离线：假模型、假 embedding、<span class="mono">tmp_path</span> 下的真 SQLite。最后一次全量 <span class="mono">uv run pytest -q</span>：<b>559 passed</b>。</p>
+
+  <div class="tbl atbl" role="table" aria-label="S11 验收清单">
+    <div class="trow head" role="row"><span>编号</span><span>验收项</span><span>结论</span><span>代码证据</span></div>
+    <div class="trow" role="row"><span class="cell">S11-1</span><span class="cell plain">工具连续失败 3 次 → 熔断 open；等待后 half-open；成功一次 → closed</span><span class="tstat pass">PASS</span><span class="cell evi"><span class="mono">GuardRuntime.tool_circuits</span> 按工具名计数：<span class="mono">ToolResultState.ERROR</span> 或工具抛异常记失败，成功记成功；open 后调用不再执行，返回 <span class="mono">ok=false · circuit_open</span>；冷却后单探针，成功即 <span class="mono">circuit.close</span>。业务拒绝（SUCCESS + ok=false）不计失败。</span></div>
+    <div class="trow" role="row"><span class="cell">S11-2</span><span class="cell plain">401/400（非瞬时）→ 只调用 1 次，不重试；429/超时 → 退避重试</span><span class="tstat pass">PASS</span><span class="cell evi"><span class="mono">_retryable</span> 只放行 TimeoutError / ConnectionError / 429 / 5xx；其余立即抛出，且不计一次熔断失败。</span></div>
+    <div class="trow" role="row"><span class="cell">S11-3</span><span class="cell plain">主模型重试用尽 → 回退模型接管，发出 <span class="mono">model.fallback</span> 事件</span><span class="tstat pass">PASS</span><span class="cell evi">候选模型链逐个尝试，切换时 <span class="mono">metrics.incr("model.fallback")</span> + 结构化日志带 reason。</span></div>
+    <div class="trow" role="row"><span class="cell">S11-4</span><span class="cell plain">同一工具、同参数、同结果连调 3 次 → 注入收敛提示，不终止</span><span class="tstat pass">PASS</span><span class="cell evi">第 3 次返回 <span class="mono">ok=false</span> + 「请更换查询条件或直接回答」，工具不执行、本轮继续。签名是 <span class="mono">tool + 参数</span> 的 sha256（<span class="mono">session.py</span>）；参数相同即结果相同，未单独比较结果体。</span></div>
+    <div class="trow" role="row"><span class="cell">S11-5</span><span class="cell plain">无检索记录直接下单 → 硬拒（返回错误 chunk，工具未执行）</span><span class="tstat pass">PASS</span><span class="cell evi">S10 的写链：<span class="mono">create_draft</span> 先解析每行 SKU 的证据，缺失抛 <span class="mono">OrderValidationError("evidence_missing")</span>；工具把它转成 <span class="mono">ok=false</span> 结果，绝不落库。</span></div>
+    <div class="trow" role="row"><span class="cell">S11-6</span><span class="cell plain">工具返回缺 <span class="mono">hits</span> 字段 → 只追加「结构异常」提示，不 raise</span><span class="tstat pass">PASS</span><span class="cell evi"><span class="mono">GuardedTool._annotate_payload</span>：<span class="mono">ok=true</span> 却缺约定字段时，向 payload 写入 <span class="mono">structure_anomaly</span> 提示并记 <span class="mono">tool.structure_anomaly</span>；状态仍为 SUCCESS，JSON 仍可解析。</span></div>
+    <div class="trow" role="row"><span class="cell">S11-7</span><span class="cell plain">token 预算耗尽 → 规则回复收口，不再调模型</span><span class="tstat pass">PASS</span><span class="cell evi">轮级 <span class="mono">turn_allowed_async()</span> 直接返回 <span class="mono">rule_fallback_text()</span>；调用级 <span class="mono">acquire</span> 拒绝时同样不发请求。</span></div>
+    <div class="trow" role="row"><span class="cell">S11-8</span><span class="cell plain">每个护栏都有独立开关，关掉后行为回到基线</span><span class="tstat pass">PASS</span><span class="cell evi"><span class="mono">GuardSwitches</span> 十个开关（timeout / retry / circuit / fallback / budget / loop / sequence / structure / content_filter / output_guard），对应 <span class="mono">guard_*_enabled</span> 配置项；各层按开关跳过自身行为，<span class="mono">/guardrails/status</span> 暴露实际生效的开关。</span></div>
+  </div>
+
+  <div class="note"><b>8 条全部与代码一致。</b>工具级熔断是这轮补的：复用同一个状态机，但用独立实例按工具名计数，所以工具故障不会把模型降档；模型的整轮 502（S5-2）保持不变——熔断只决定「这个工具还值不值得再调」。</div>
+
+  <div class="note"><b>为什么护栏不写在 prompt 里？</b>prompt 是模型可以忘记的建议，代理是模型绕不过的代码。<span class="mono">guardrails_enabled=false</span> 时模型和工具都不包裹，行为完整退回 S10；打开时，主 Agent、子 Agent、摘要调用共享同一份预算与熔断状态，但每个 Agent 有自己的循环窗口——一个买家的重复搜索不会把另一个买家拦下来。</div>
+</main>
+
+<script>
+  (function () {
+    var used, msg, log;
+    var MAX_CALLS = 8;
+    var state = { circuit: "closed", calls: 0, events: [] };
+
+    var TIER_TONE = { main: "good", lite: "pending", minimal: "pending", fallback: "end" };
+
+    function tierFor(ratio) {
+      if (ratio > 0.5) return "main";
+      if (ratio > 0.2) return "lite";
+      if (ratio > 0.05) return "minimal";
+      return "fallback";
+    }
+
+    function modelFor(tier) {
+      if (tier === "fallback") return "— 不发请求";
+      if (tier === "main") return "原模型";
+      return "lite_model（未配置则原模型）";
+    }
+
+    function chip(value, tone) {
+      if (!value) return '<span class="sim-chip none">—</span>';
+      return '<span class="sim-chip ' + (tone || "end") + '">' + value + '</span>';
+    }
+
+    function say(kind, text) {
+      msg.className = "sim-msg" + (kind ? " " + kind : "");
+      msg.textContent = text;
+    }
+
+    function addEvent(name, meta) {
+      state.events.unshift({ name: name, meta: meta });
+      if (state.events.length > 10) state.events.pop();
+      renderLog();
+    }
+
+    function renderLog() {
+      if (!state.events.length) {
+        log.innerHTML = '<li class="ev empty">还没有事件</li>';
+        return;
+      }
+      log.innerHTML = state.events.map(function (e) {
+        return '<li class="ev"><span>' + e.name + '</span><span class="ev-meta">' + e.meta + '</span></li>';
+      }).join("");
+    }
+
+    function render() {
+      var pct = Number(used.value);
+      var ratio = (100 - pct) / 100;
+      var tier = tierFor(ratio);
+      document.getElementById("used-label").textContent = pct + "%";
+      document.getElementById("left-label").textContent = (100 - pct) + "%";
+      document.getElementById("st-tier").innerHTML = chip(tier, TIER_TONE[tier]);
+      document.getElementById("st-model").innerHTML = chip(modelFor(tier), tier === "fallback" ? "end" : "good");
+      document.getElementById("st-circuit").innerHTML = chip(state.circuit, state.circuit === "closed" ? "good" : "pending");
+      document.getElementById("st-calls").innerHTML = chip(state.calls + " / " + MAX_CALLS, state.calls >= MAX_CALLS ? "pending" : "");
+
+      if (tier === "fallback") {
+        say("err", "剩余 " + (100 - pct) + "%，低于 5%：run_turn 直接返回固定兜底文案，模型一次都不会被调用。");
+      } else if (tier === "minimal") {
+        say("ok", "剩余 " + (100 - pct) + "%，minimal 档：换 lite 模型，并在系统提示后插入「最多再检索一次」。");
+      } else if (tier === "lite") {
+        say("ok", "剩余 " + (100 - pct) + "%，lite 档：换 lite 模型，每次调用记一次 model.fallback。");
+      } else {
+        say("ok", "剩余 " + (100 - pct) + "%，main 档：用原模型，不降级、不加提示。");
+      }
+    }
+
+    function act(name) {
+      if (name === "fail") {
+        state.circuit = "open";
+        state.calls = Math.min(MAX_CALLS, state.calls + 1);
+        addEvent("circuit.open", "主模型 · 连续 3 次 500");
+        addEvent("model.fallback", "reason=circuit_open");
+        render();
+        say("err", "主模型熔断：本轮改走 fallback_model；若没有候选，调用级抛 BudgetExhausted，轮级返回 502。");
+        return;
+      }
+      if (name === "probe") {
+        if (state.circuit !== "open") {
+          say("err", "熔断器当前是 " + state.circuit + "，没有可探测的 open 状态。先点「模拟 3 次 500」。");
+          return;
+        }
+        state.circuit = "closed";
+        addEvent("circuit.close", "半开探针成功");
+        render();
+        say("ok", "60s 冷却后第一个调用拿到探针，成功一次即关闭并清零失败数；探针再失败则重新计时。");
+        return;
+      }
+      if (name === "loop") {
+        addEvent("tool.loop_blocked", "product_search · 第 3 次");
+        addEvent("content.filtered", "—（未执行，不产生输出）");
+        render();
+        say("ok", "第 3 次相同 (工具, 参数) 被拦下：返回 SUCCESS + ok=false，模型看到「请更换查询条件」。被拒的调用不写循环窗口。");
+        return;
+      }
+      if (name === "seq") {
+        addEvent("tool.sequence_blocked", "task_dispatch · rule=task_dispatch");
+        render();
+        say("ok", "本轮已经派发过一次，第二次直接返回 sequence_violation——第一次的结果已经在上下文里，重复派发只是重复花钱。");
+        return;
+      }
+      if (name === "price") {
+        addEvent("output.guarded", "rule=ungrounded_price");
+        render();
+        say("ok", "回复里的 ¥1999 不在事实集（搜索价 ∪ 派发验证价 ∪ 订单总额）里，被改写为「〔价格以确认页为准〕」——修而不拒，买家仍拿到完整答复。");
+        return;
+      }
+      if (name === "reset") {
+        state = { circuit: "closed", calls: 0, events: [] };
+        used.value = 0;
+        renderLog();
+        render();
+        return;
+      }
+    }
+
+    function init() {
+      used = document.getElementById("used");
+      msg = document.getElementById("sim-msg");
+      log = document.getElementById("sim-log");
+      used.addEventListener("input", render);
+      document.querySelectorAll(".sim-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () { act(btn.getAttribute("data-act")); });
+      });
+      renderLog();
+      render();
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", init);
+    } else {
+      init();
+    }
+  })();
+</script>

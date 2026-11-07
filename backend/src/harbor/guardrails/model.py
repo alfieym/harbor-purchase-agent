@@ -87,7 +87,7 @@ class GuardedChatModel(ChatModelBase):
     def _candidates(self, selected: str) -> list[str]:
         chain = [selected]
         fallback = self.runtime.fallback_model
-        if fallback and fallback != selected:
+        if self.runtime.switches.fallback and fallback and fallback != selected:
             chain.append(fallback)
         return chain
 
@@ -100,7 +100,9 @@ class GuardedChatModel(ChatModelBase):
         index = 1 if prepared and getattr(prepared[0], "role", None) == "system" else 0
         return prepared[:index] + [hint] + prepared[index:]
 
-    async def _settle(self, admission: Admission, response: ChatResponse) -> None:
+    async def _settle(self, admission: Admission | None, response: ChatResponse) -> None:
+        if admission is None:
+            return
         usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
         if usage is None:
             await self.runtime.budget.settle_async(admission.reserved, admission.reserved)
@@ -133,7 +135,14 @@ class GuardedChatModel(ChatModelBase):
         tool_choice: Any = None,
         **kwargs: Any,
     ) -> ChatResponse:
-        tier = await self.runtime.budget.tier_async()
+        switches = self.runtime.switches
+        # With the budget off the model sees the pre-S11 world: no tier, no
+        # admission, no per-call estimate — just the call.
+        tier = (
+            await self.runtime.budget.tier_async()
+            if switches.budget
+            else BudgetTier.MAIN
+        )
         if tier is BudgetTier.FALLBACK:
             # The turn-level gate should have caught this already; if it did
             # not, still refuse rather than send a doomed request.
@@ -153,23 +162,27 @@ class GuardedChatModel(ChatModelBase):
             self.runtime.last_tier = tier
 
         prepared = self._prepare(messages, tier)
-        estimate = self.runtime.budget.estimate(prepared)
+        estimate = self.runtime.budget.estimate(prepared) if switches.budget else 0
+        max_retries = self._max_retries if switches.retry else 0
+        timeout = self.request_timeout if switches.timeout else None
         last_error: BaseException | None = None
         skipped_for_circuit = False
 
         for index, name in enumerate(self._candidates(selected)):
-            if not self.runtime.circuits.allow(name):
+            if switches.circuit and not self.runtime.circuits.allow(name):
                 skipped_for_circuit = True
                 log_guard_event("circuit.skip", model=name, reason="circuit_open")
                 continue
-            admission = await self.runtime.budget.acquire_async(estimate)
-            if not admission.granted:
-                raise self._exhausted("acquire_refused")
+            admission: Admission | None = None
+            if switches.budget:
+                admission = await self.runtime.budget.acquire_async(estimate)
+                if not admission.granted:
+                    raise self._exhausted("acquire_refused")
             if index > 0 or skipped_for_circuit:
                 reason = "circuit_open" if skipped_for_circuit else "retry_exhausted"
                 self._fallback_event(name, reason, tier)
 
-            for attempt in range(self._max_retries + 1):
+            for attempt in range(max_retries + 1):
                 try:
                     response = await asyncio.wait_for(
                         self._model_factory(name)(
@@ -178,28 +191,33 @@ class GuardedChatModel(ChatModelBase):
                             tool_choice=tool_choice,
                             **kwargs,
                         ),
-                        timeout=self.request_timeout,
+                        timeout=timeout,
                     )
                 except asyncio.CancelledError:
-                    await self.runtime.budget.release_async(admission.reserved)
+                    if admission is not None:
+                        await self.runtime.budget.release_async(admission.reserved)
                     raise
                 except Exception as exc:  # noqa: BLE001 - classified below
                     if not _retryable(exc):
-                        await self.runtime.budget.release_async(admission.reserved)
+                        if admission is not None:
+                            await self.runtime.budget.release_async(admission.reserved)
                         raise
-                    if attempt < self._max_retries:
+                    if attempt < max_retries:
                         self.runtime.metrics.incr("model.retry")
                         log_guard_event("model.retry", model=name, count=attempt + 1)
                         if self._backoff:
                             await asyncio.sleep(self._backoff * (2**attempt))
                         continue
-                    await self.runtime.budget.release_async(admission.reserved)
-                    self.runtime.circuits.record_failure(name)
+                    if admission is not None:
+                        await self.runtime.budget.release_async(admission.reserved)
+                    if switches.circuit:
+                        self.runtime.circuits.record_failure(name)
                     last_error = exc
                     break
                 else:
                     await self._settle(admission, response)
-                    self.runtime.circuits.record_success(name)
+                    if switches.circuit:
+                        self.runtime.circuits.record_success(name)
                     return response
 
         if last_error is not None:
