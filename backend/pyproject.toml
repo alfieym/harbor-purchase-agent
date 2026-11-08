@@ -11,6 +11,7 @@ dependencies = [
     "httpx>=0.28.1",
     "fastembed>=0.9.1",
     "agentscope==2.0.11",
+    "redis>=5.0,<7",
 ]
 
 [dependency-groups]

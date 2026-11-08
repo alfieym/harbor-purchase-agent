@@ -96,6 +96,11 @@ def _probe_embedder(embedder: OpenAIEmbedder) -> str | None:
 def _embedders(settings: Settings) -> tuple[OpenAIEmbedder, Embedder | None]:
     """Build the query embedder plus an index-only stand-in when the endpoint is down."""
     embedder = OpenAIEmbedder(settings)
+    if not settings.index_build_enabled:
+        # A read-only process (the S15 worker) never builds, so probing the
+        # endpoint would spend an embedding call on a decision it cannot act
+        # on. It keeps the real query embedder and reads the shared index.
+        return embedder, None
     error = _probe_embedder(embedder)
     if error is None:
         return embedder, None
@@ -118,14 +123,36 @@ def _catalog_fingerprint(data_path: Path, settings: Settings, degraded: bool) ->
 
 
 def _open_index(data_path: Path, settings: Settings, degraded: bool) -> tuple[QdrantClient, str]:
-    """Open the on-disk index, dropping it when the catalog or embedder changed."""
-    INDEX_DIR.mkdir(parents=True, exist_ok=True)
-    client = QdrantClient(path=str(INDEX_DIR))
+    """Open the index, dropping it when the catalog or embedder changed.
+
+    Local-path mode holds an exclusive lock on the directory, so a deployment
+    with more than one process points ``HARBOR_QDRANT_URL`` at a server
+    instead; only the API may build, and the worker refuses to start against a
+    missing index rather than silently paying to rebuild it.
+    """
+    if settings.qdrant_url:
+        client = QdrantClient(url=settings.qdrant_url)
+    else:
+        INDEX_DIR.mkdir(parents=True, exist_ok=True)
+        client = QdrantClient(path=str(INDEX_DIR))
     fingerprint = _catalog_fingerprint(data_path, settings, degraded)
     cached = (
         FINGERPRINT_PATH.read_text(encoding="utf-8").strip() if FINGERPRINT_PATH.exists() else None
     )
     indexed = client.collection_exists(COLLECTION) and client.count(COLLECTION).count > 0
+    if not settings.index_build_enabled:
+        if not indexed:
+            raise RuntimeError(
+                "search index missing and this process is read-only "
+                "(HARBOR_INDEX_BUILD_ENABLED=false); start the API first"
+            )
+        if cached != fingerprint:
+            raise RuntimeError(
+                "search index was built for a different catalog or embedder; "
+                "restart the API to rebuild it"
+            )
+        print("提示：复用共享索引（只读进程）。", file=sys.stderr)
+        return client, fingerprint
     if indexed and cached == fingerprint:
         print("提示：复用本地索引（跳过 embedding）。", file=sys.stderr)
     elif indexed:

@@ -317,6 +317,7 @@ def test_startup_interrupts_runs_orphaned_by_a_restart(tmp_path: Path) -> None:
         buyer_id="b1",
         shopping_session_id="s1",
         input_text="找台灯",
+        status="running",
     )
     manager = RunManager(store, _success)
 

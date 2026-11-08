@@ -1,0 +1,15 @@
+# The image contains code only: data, caches and node_modules arrive at
+# runtime (mounted) or are not needed at all.
+.git
+.superpowers
+.cache
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+data
+docs
+frontend
+node_modules
+tmp
+output

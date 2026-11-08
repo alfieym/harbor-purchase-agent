@@ -163,6 +163,34 @@ class Settings(BaseSettings):
     run_event_buffer: int = Field(default=500, ge=1)
     run_heartbeat_seconds: float = Field(default=15.0, gt=0)
 
+    # S15: queue and deployment. Off by default — the inline single-process
+    # path is what development and the test suite use, and turning this on
+    # needs a reachable Redis plus at least one worker.
+    queue_enabled: bool = False
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        validation_alias=AliasChoices("HARBOR_REDIS_URL", "REDIS_URL"),
+    )
+    queue_stream: str = "harbor:runs"
+    queue_group: str = "harbor-workers"
+    # A message is presumed lost after this long without an acknowledgement;
+    # it is re-delivered, and the journal makes the duplicate a no-op.
+    queue_claim_idle_ms: int = Field(default=60_000, ge=1)
+    worker_concurrency: int = Field(default=2, ge=1, le=32)
+    # A worker that has not renewed its heartbeat for this long is presumed
+    # dead, and its run is marked interrupted rather than restarted.
+    run_lease_seconds: float = Field(default=90.0, gt=0)
+    run_requeue_after_seconds: float = Field(default=15.0, gt=0)
+    run_sweep_seconds: float = Field(default=5.0, gt=0)
+    run_follow_poll_seconds: float = Field(default=0.1, gt=0)
+
+    # S15 deployment: a second process cannot open the on-disk index (Qdrant
+    # local mode is exclusive), so a deployed worker points at a Qdrant server
+    # and is forbidden from rebuilding the index — embedding is paid for once,
+    # by the API.
+    qdrant_url: str | None = None
+    index_build_enabled: bool = True
+
     # S9: multi-agent dispatch. The batch budget must fit inside the parent
     # turn, or a slow batch would turn the whole request into a 504 (S9-4).
     dispatch_enabled: bool = True

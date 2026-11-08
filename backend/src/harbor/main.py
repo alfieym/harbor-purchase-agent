@@ -11,19 +11,21 @@ from harbor.core.errors import install_error_handlers
 from harbor.core.logging import setup_logging
 from harbor.features.chat.repository import SessionRepository
 from harbor.features.chat.router import router as commerce_router
-from harbor.features.chat.service import SessionStore, run_turn
+from harbor.features.chat.service import SessionStore
 from harbor.features.guardrails.router import router as guardrails_router
 from harbor.features.health.router import router as health_router
 from harbor.features.orders.evidence import SqliteEvidenceStore
 from harbor.features.orders.router import router as orders_router
 from harbor.features.orders.service import OrderService
 from harbor.features.orders.store import SqliteOrderStore
+from harbor.features.runs.queue import RedisRunQueue
 from harbor.features.runs.router import router as agui_router
 from harbor.features.runs.service import RunManager
 from harbor.features.runs.store import SqliteRunStore
 from harbor.observability import Observability, configure_observability
 from harbor.observability.middleware import observability_middleware
 from harbor.observability.router import router as observability_router
+from harbor.runtime import build_turn_runner
 
 logger = logging.getLogger(__name__)
 
@@ -42,29 +44,25 @@ def build_run_manager(
     if chat_store is None or not settings.agui_enabled:
         return None
 
-    async def turn_runner(
-        buyer_id: str,
-        session_id: str,
-        text: str,
-        on_tool_results,
-        on_text_delta,
-    ):
-        return await run_turn(
-            chat_store,
-            buyer_id,
-            session_id,
-            text,
-            timeout_seconds=settings.turn_timeout_seconds,
-            order_service=order_service,
-            on_tool_results=on_tool_results,
-            on_text_delta=on_text_delta,
-        )
+    turn_runner = build_turn_runner(settings, chat_store, order_service)
 
+    queue = None
+    if settings.queue_enabled:
+        # Constructing the client does not connect: the API stays up while
+        # Redis is down, and each enqueue simply logs and lets the sweeper
+        # re-send the run later.
+        queue = RedisRunQueue(
+            settings.redis_url,
+            stream=settings.queue_stream,
+            group=settings.queue_group,
+        )
     return RunManager(
         SqliteRunStore(settings.runs_db_path),
         turn_runner,
+        queue=queue,
         subscriber_buffer=settings.run_event_buffer,
         heartbeat_seconds=settings.run_heartbeat_seconds,
+        follow_poll_seconds=settings.run_follow_poll_seconds,
     )
 
 

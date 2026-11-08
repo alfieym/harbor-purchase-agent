@@ -19,6 +19,9 @@ def _create(store: SqliteRunStore, run_id: str = "r1") -> None:
         buyer_id="b1",
         shopping_session_id="s1",
         input_text="找台灯",
+        # S14 semantics: a run created here is already executing in this
+        # process; the queued default belongs to the S15 worker path.
+        status="running",
     )
 
 

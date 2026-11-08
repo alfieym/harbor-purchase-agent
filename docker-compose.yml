@@ -1,0 +1,102 @@
+# S15 deployment: two processes, one journal.
+#
+#   api     — registers a run, enqueues it, streams the journal back
+#   worker  — claims the run and executes it
+#   redis   — wake-up channel only; losing every message costs wake-ups, not runs
+#   qdrant  — the shared search index (local-path mode is single-process only)
+#
+# Both processes read and write the same ./data directory, which holds the
+# run journal, sessions and orders. SQLite serialises the writers; redis does
+# not need to be consistent with it, because the journal is the truth.
+#
+#   make docker-up      start everything
+#   make docker-logs    follow api + worker
+#   make docker-down    stop
+
+name: harbor
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # A Qdrant server, not a local path: two processes cannot open the on-disk
+  # store, and both the API and the worker serve searches.
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - backend/.env
+    environment:
+      HARBOR_HOST: 0.0.0.0
+      HARBOR_QUEUE_ENABLED: "true"
+      HARBOR_REDIS_URL: redis://redis:6379/0
+      HARBOR_QDRANT_URL: http://qdrant:6333
+    ports:
+      - "8010:8010"
+    volumes:
+      - ./data:/app/data
+      - index-cache:/app/.cache
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health')
+      # The first boot embeds the whole catalog; give it time before failing.
+      start_period: 300s
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "harbor.worker"]
+    env_file:
+      - backend/.env
+    environment:
+      HARBOR_QUEUE_ENABLED: "true"
+      HARBOR_REDIS_URL: redis://redis:6379/0
+      HARBOR_QDRANT_URL: http://qdrant:6333
+      # Exactly one process may build the index: it spends embedding quota and
+      # two builders would race on the same collection. The worker starts only
+      # after the API reports healthy, so the index is already there.
+      HARBOR_INDEX_BUILD_ENABLED: "false"
+    volumes:
+      - ./data:/app/data
+      - index-cache:/app/.cache
+    depends_on:
+      api:
+        condition: service_healthy
+    # SIGTERM marks in-flight runs interrupted before Docker sends SIGKILL.
+    stop_grace_period: 60s
+
+volumes:
+  redis-data:
+  qdrant-data:
+  index-cache:

@@ -9,7 +9,7 @@ export UV_DEFAULT_INDEX ?= https://mirrors.aliyun.com/pypi/simple
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup dev dev-api dev-web cli test lint format typecheck gen-api check clean distclean
+.PHONY: help setup dev dev-api dev-web worker cli test lint format typecheck gen-api check clean distclean docker-up docker-down docker-logs
 
 help:
 	@printf '%s\n' \
@@ -19,6 +19,10 @@ help:
 	  '  dev        并行启动后端 (8010) 与前端 (5173)' \
 	  '  dev-api    仅启动后端（自动重载）' \
 	  '  dev-web    仅启动前端' \
+	  '  worker     S15：单独启动一个执行进程（需先 HARBOR_QUEUE_ENABLED=true 启动后端）' \
+	  '  docker-up  构建并启动 redis / qdrant / api / worker（S15）' \
+	  '  docker-logs 跟踪 api 与 worker 的日志' \
+	  '  docker-down 停止整套服务' \
 	  '  cli        启动采购助手交互式 REPL（S4）' \
 	  '  test       运行后端测试' \
 	  '  lint       检查 Python 代码风格与格式' \
@@ -43,6 +47,20 @@ dev-api:
 
 dev-web:
 	$(WEB) run dev
+
+# S15：队列模式下的执行进程。与后端共用同一个 runs.sqlite3，靠 Redis 唤醒。
+worker:
+	$(PY) python -m harbor.worker
+
+docker-up:
+	docker compose up --build -d
+	@echo "API: http://127.0.0.1:8010  （首次启动要建索引，健康检查通过前 worker 不会开始领取任务）"
+
+docker-logs:
+	docker compose logs -f api worker
+
+docker-down:
+	docker compose down
 
 cli:
 	$(PY) python -m harbor.agents

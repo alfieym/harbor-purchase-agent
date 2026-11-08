@@ -133,6 +133,8 @@ test('an interrupted run reads as a failure, never as running', () => {
   assert.equal(terminalRunStatus('finished'), 'finished')
   assert.equal(terminalRunStatus('cancelled'), 'cancelled')
   assert.equal(terminalRunStatus('running'), null)
+  // S15: a registered-but-not-yet-claimed run is still live.
+  assert.equal(terminalRunStatus('queued'), null)
 })
 
 test('a stream teardown cannot overwrite a run that already ended', () => {

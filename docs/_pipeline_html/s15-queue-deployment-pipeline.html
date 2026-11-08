@@ -1,0 +1,449 @@
+<title>S15 队列与部署</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C; --accent-soft: #E3F1EE;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --warn: #9A6700; --warn-soft: #FBF1DC;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --warn: #E0A63C; --warn-soft: #33270F;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --warn: #E0A63C; --warn-soft: #33270F;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(56px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  header { margin-bottom: 16px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 8px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 68ch; }
+  .sub b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.accent { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+
+  .flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; padding: 14px 18px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  @media (max-width: 860px) { .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 540px) { .flow { grid-template-columns: 1fr; gap: 10px; } }
+  .fcell { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 9px; align-content: start; padding: 2px 0 2px 10px; border-left: 2px solid var(--accent); }
+  .fidx { grid-row: 1 / span 2; font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--accent-ink); line-height: 1.35; }
+  .fname { font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .fcount { grid-column: 2; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+  .fout { grid-column: 1 / -1; margin-top: 5px; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--muted); }
+  .fout::before { content: "→ "; color: var(--accent); }
+  .hint { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+
+  .mhead { margin: 34px 0 4px; font-size: 19px; font-weight: 700; text-wrap: balance; }
+  .msub { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 74ch; }
+  .msub b { color: var(--fg); }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  figure { margin: 0; }
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; height: auto; min-width: 720px; }
+  figcaption { font-size: 12.5px; color: var(--muted); margin-top: 8px; padding-left: 2px; max-width: 78ch; }
+  figcaption b { color: var(--fg); }
+  .lane-label { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--muted); letter-spacing: .04em; }
+  .lane-sub { font-size: 10px; fill: var(--faint); }
+  .box-title { font-size: 12.5px; font-weight: 600; fill: var(--fg); }
+  .box-title.bad { fill: var(--bad); }
+  .box-title.good { fill: var(--good); }
+  .box-title.warn { fill: var(--warn); }
+  .box-sub { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--muted); }
+  .box-sub-accent { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--accent-ink); }
+  .edge-label { font-size: 10px; fill: var(--muted); }
+
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .trow { display: grid; grid-template-columns: .8fr 2fr .7fr 1.3fr; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .trow:last-child { border-bottom: 0; }
+  .trow.head { background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .cell { font-family: "IBM Plex Mono", monospace; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+  .cell.plain { font-family: "IBM Plex Sans", sans-serif; font-size: 12.5px; color: var(--muted); }
+  .cell.plain b { color: var(--fg); }
+  .tstat { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; text-align: center; white-space: nowrap; }
+  .tstat.yes { color: var(--good); background: var(--good-soft); }
+  .tstat.no { color: var(--bad); background: var(--bad-soft); }
+  .tstat.mid { color: var(--warn); background: var(--warn-soft); }
+
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .threecol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 820px) { .threecol { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .panel h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
+  .panel p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .panel p b { color: var(--fg); }
+
+  .note { margin-top: 16px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+  .note + .note { margin-top: 10px; }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { padding: 12px 14px; }
+    .trow { grid-template-columns: 1fr; gap: 4px; }
+    .trow.head { display: none; }
+    .tstat { justify-self: start; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Purchase Agent · S15</p>
+    <h1>API 不再执行 turn</h1>
+    <p class="sub">API 只剩三个动作：<b>登记 run、入队、读 journal</b>。执行全部发生在 worker。<b>Redis 只是一声提醒</b>，SQLite 的 <span class="mono">run_events</span> 才是唯一真相——提醒丢了，run 不会丢。</p>
+    <div class="chips">
+      <span class="chip accent">202 · 行已 queued</span>
+      <span class="chip">Redis Streams · 只是唤醒</span>
+      <span class="chip">claim 是 CAS</span>
+      <span class="chip good">64 tests · 794 全绿</span>
+    </div>
+
+    <div class="flow" aria-label="S15 流程">
+      <div class="fcell"><span class="fidx">①</span><span class="fname">POST /runs</span><span class="fcount">建行 · status=queued</span><span class="fout">先落库</span></div>
+      <div class="fcell"><span class="fidx">②</span><span class="fname">RUN_STARTED</span><span class="fcount">seq = 1</span><span class="fout">回放从第一帧就有</span></div>
+      <div class="fcell"><span class="fidx">③</span><span class="fname">XADD</span><span class="fcount">harbor:runs</span><span class="fout">只带 run id</span></div>
+      <div class="fcell"><span class="fidx">④</span><span class="fname">XREADGROUP</span><span class="fcount">消费者组领取</span><span class="fout">消息不被信任</span></div>
+      <div class="fcell"><span class="fidx">⑤</span><span class="fname">try_claim</span><span class="fcount">UPDATE ... WHERE queued</span><span class="fout">rowcount 定胜负</span></div>
+      <div class="fcell"><span class="fidx">⑥</span><span class="fname">轮询 journal</span><span class="fcount">list_events(after_seq)</span><span class="fout">终态即关流</span></div>
+    </div>
+    <p class="hint">一条规则撑起整页：只有仍然 <span class="mono">queued</span> 的行，才允许被执行。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2 class="mhead">一条 run 跨两个进程</h2>
+  <p class="msub">四条泳道按<b>谁负责什么</b>分：API 只登记和转播，Redis 只喊人，worker 是唯一执行者。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 700" role="img" aria-label="S15 四条泳道。登记道：API 收到 POST /runs 后插入 status=queued 的行，追加 RUN_STARTED 拿到序号 1，再向 Redis 发一条只含 run id 的唤醒消息，然后返回 202。唤醒道：消息进入 harbor:runs 流，由 harbor-workers 消费者组投递；未确认的消息在空闲超时后被重新投递。执行道：worker 领取消息后先读行，只有 status 仍是 queued 才继续；先取得会话租约，再用条件更新认领，成功才执行 turn 并写 journal；重复投递的第二次条件更新影响零行，直接确认。跟随道：API 轮询 run_events，按序号输出事件，读到终态事件或发现空批且行已终态就关闭流；空批时若行已终态，必须再读一次日志，防止漏掉两读之间写入的结尾。">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+          <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="arr-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--good)"/></marker>
+          <marker id="arr-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--bad)"/></marker>
+        </defs>
+
+        <!-- ① 登记 -->
+        <rect x="0" y="20" width="1000" height="118" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="44">① 登记</text>
+        <text class="lane-sub" x="14" y="58">API 活着</text>
+
+        <rect x="90" y="56" width="180" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="76">POST /runs</text>
+        <text class="box-sub" x="104" y="94">buyerId · text</text>
+
+        <rect x="296" y="56" width="180" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="310" y="76">INSERT queued</text>
+        <text class="box-sub" x="310" y="94">行先存在</text>
+
+        <rect x="502" y="56" width="180" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="516" y="76">RUN_STARTED</text>
+        <text class="box-sub" x="516" y="94">seq = 1</text>
+
+        <rect x="724" y="56" width="180" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="738" y="76">XADD 唤醒</text>
+        <text class="box-sub" x="738" y="94">只带 run id</text>
+
+        <line x1="270" y1="84" x2="294" y2="84" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="476" y1="84" x2="500" y2="84" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="682" y1="84" x2="722" y2="84" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="90" y="132">先落库，再喊人。喊丢了只是没人立刻来，sweeper 会补喊；run 本身不会丢</text>
+
+        <!-- ② 唤醒 -->
+        <rect x="0" y="158" width="1000" height="118" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="182">② 唤醒</text>
+        <text class="lane-sub" x="14" y="196">Redis 活着</text>
+
+        <rect x="90" y="194" width="200" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="214">Stream harbor:runs</text>
+        <text class="box-sub" x="104" y="232">append-only</text>
+
+        <rect x="316" y="194" width="200" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="330" y="214">group harbor-workers</text>
+        <text class="box-sub" x="330" y="232">谁领到谁试</text>
+
+        <rect x="542" y="194" width="200" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="556" y="214">未 ack 的消息</text>
+        <text class="box-sub" x="556" y="232">空闲 60s 后重投</text>
+
+        <rect x="768" y="194" width="160" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="782" y="214">内容不可信</text>
+        <text class="box-sub" x="782" y="232">只是 nudge</text>
+
+        <line x1="290" y1="222" x2="314" y2="222" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="516" y1="222" x2="540" y2="222" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="742" y1="222" x2="766" y2="222" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="90" y="268">同一 run 的 id 被投递两次是正常现象——执行侧必须自己消化重复</text>
+
+        <!-- ③ 执行 -->
+        <rect x="0" y="296" width="1000" height="240" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="320">③ 执行</text>
+        <text class="lane-sub" x="14" y="334">worker 活着</text>
+
+        <rect x="90" y="330" width="180" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="350">XREADGROUP</text>
+        <text class="box-sub" x="104" y="368">拿到 run id</text>
+
+        <rect x="296" y="330" width="180" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="310" y="350">get_run</text>
+        <text class="box-sub" x="310" y="368">以行为准</text>
+
+        <rect x="502" y="330" width="190" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="516" y="350">status == queued?</text>
+        <text class="box-sub" x="516" y="368">否 → ack，不执行</text>
+
+        <rect x="718" y="330" width="190" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="732" y="350">acquire_session</text>
+        <text class="box-sub" x="732" y="368">一个会话一个 turn</text>
+
+        <rect x="90" y="406" width="180" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="426">try_claim</text>
+        <text class="box-sub-accent" x="104" y="444">WHERE queued</text>
+
+        <rect x="296" y="406" width="190" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="310" y="426">execute_turn</text>
+        <text class="box-sub" x="310" y="444">和 S14 同一段逻辑</text>
+
+        <rect x="512" y="406" width="190" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="526" y="426">写 journal</text>
+        <text class="box-sub" x="526" y="444">每条事件带着序号</text>
+
+        <rect x="728" y="406" width="180" height="56" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="742" y="426">ack</text>
+        <text class="box-sub" x="742" y="444">消息使命结束</text>
+
+        <line x1="270" y1="358" x2="294" y2="358" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="476" y1="358" x2="500" y2="358" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="692" y1="358" x2="716" y2="358" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="180" y1="386" x2="180" y2="404" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="270" y1="434" x2="294" y2="434" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="486" y1="434" x2="510" y2="434" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="702" y1="434" x2="726" y2="434" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="90" y="498">已经开始的 run 永不重跑：它的旁白已经在别人的屏幕上，重来只会变成两遍</text>
+        <text class="edge-label" x="90" y="516">取消与心跳检查只挡叙述帧；收尾帧一律放行，否则日志无法回放</text>
+
+        <!-- ④ 跟随 -->
+        <rect x="0" y="556" width="1000" height="120" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="580">④ 跟随</text>
+        <text class="lane-sub" x="14" y="594">读者可多个</text>
+
+        <rect x="90" y="592" width="190" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="612">GET .../events</text>
+        <text class="box-sub" x="104" y="630">after 或 Last-Event-ID</text>
+
+        <rect x="300" y="592" width="210" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="314" y="612">list_events(after_seq)</text>
+        <text class="box-sub" x="314" y="630">每 0.1s 轮询一次</text>
+
+        <rect x="530" y="592" width="200" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="544" y="612">空批？看 status</text>
+        <text class="box-sub" x="544" y="630">终态 → 准备关流</text>
+
+        <rect x="750" y="592" width="190" height="56" rx="10" fill="var(--warn-soft)" stroke="var(--warn)"/>
+        <text class="box-title warn" x="764" y="612">终态：再读一次</text>
+        <text class="box-sub" x="764" y="630">两次读不是一个快照</text>
+
+        <line x1="280" y1="620" x2="298" y2="620" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="510" y1="620" x2="528" y2="620" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="730" y1="620" x2="748" y2="620" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="90" y="668">两个读者各自记自己的序号，不需要协调：日志本身就是共享的那一份</text>
+      </svg>
+    </div>
+    <figcaption><b>Redis 里永远没有 run 的状态。</b>消息只是一句「去看看吧」；worker 看一眼 SQLite 才决定做什么。所以 Redis 停机、消息重复、消息丢失，都只影响<em>多快</em>被处理，不影响<em>会不会</em>被处理。</figcaption>
+  </figure>
+
+  <h2 class="mhead">一次投递，不等于一次执行</h2>
+  <p class="msub">队列保证 <b>at-least-once</b>：同一条消息可能被送到两次。系统要做到两次投递、一次执行——靠的不是去重表，而是一条带条件的 UPDATE。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 250" role="img" aria-label="S15 重复投递时序。第一条消息让 worker 执行 UPDATE runs SET status=running WHERE status=queued；影响一行，说明认领成功，于是执行 turn 并写下完整的 journal。第二条消息携带同一个 run id，执行同一条 UPDATE；此时行已不是 queued，影响零行，直接确认，不执行任何 turn。因此 at-least-once 的投递被收敛成 exactly-once 的执行。">
+        <defs>
+          <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+          <marker id="arr2-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--good)"/></marker>
+        </defs>
+
+        <rect x="60" y="48" width="150" height="52" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="76" y="70">消息 #1</text>
+        <text class="box-sub" x="76" y="88">run_r</text>
+        <rect x="240" y="48" width="280" height="52" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="254" y="70">UPDATE ... WHERE queued</text>
+        <text class="box-sub" x="254" y="88">CAS：状态自己当条件</text>
+        <rect x="550" y="48" width="150" height="52" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="566" y="70">rowcount = 1</text>
+        <text class="box-sub" x="566" y="88">我赢了</text>
+        <rect x="730" y="48" width="210" height="52" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="744" y="70">执行 · 写完整 journal</text>
+        <text class="box-sub" x="744" y="88">恰好一次</text>
+
+        <line x1="210" y1="74" x2="238" y2="74" stroke="var(--muted)" marker-end="url(#arr2)"/>
+        <line x1="520" y1="74" x2="548" y2="74" stroke="var(--muted)" marker-end="url(#arr2-good)"/>
+        <line x1="700" y1="74" x2="728" y2="74" stroke="var(--muted)" marker-end="url(#arr2)"/>
+
+        <rect x="60" y="132" width="150" height="52" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="76" y="154">消息 #2</text>
+        <text class="box-sub" x="76" y="172">run_r · 又一次</text>
+        <rect x="240" y="132" width="280" height="52" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="254" y="154">同一条 UPDATE</text>
+        <text class="box-sub" x="254" y="172">行已经不是 queued</text>
+        <rect x="550" y="132" width="150" height="52" rx="10" fill="var(--bad-soft)" stroke="var(--bad)"/>
+        <text class="box-title bad" x="566" y="154">rowcount = 0</text>
+        <text class="box-sub" x="566" y="172">不是我的活</text>
+        <rect x="730" y="132" width="210" height="52" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="744" y="154">ack，什么都不做</text>
+        <text class="box-sub" x="744" y="172">重复无偿消失</text>
+
+        <line x1="210" y1="158" x2="238" y2="158" stroke="var(--muted)" marker-end="url(#arr2)"/>
+        <line x1="520" y1="158" x2="548" y2="158" stroke="var(--muted)" marker-end="url(#arr2)"/>
+        <line x1="700" y1="158" x2="728" y2="158" stroke="var(--muted)" marker-end="url(#arr2)"/>
+
+        <rect x="60" y="202" width="880" height="30" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-sub-accent" x="76" y="221">不变量：UPDATE 影响 1 行的人执行；影响 0 行的人确认后退出。没有去重表，也没有锁竞争。</text>
+      </svg>
+    </div>
+    <figcaption><b>状态机自己就是幂等键。</b><span class="mono">queued</span> 只能被消费一次，因为「改成 running」这个动作只有在它仍然是 queued 时才成功。数据库替我们做了裁决。</figcaption>
+  </figure>
+
+  <h2 class="mhead">状态的走法</h2>
+  <p class="msub">每个 run 从 <span class="mono">queued</span> 出发，只会落在四种结局之一；已经 <span class="mono">running</span> 的永远不会退回 <span class="mono">queued</span>。</p>
+
+  <div class="tbl" role="table" aria-label="S15 状态迁移">
+    <div class="trow head" role="row"><span>迁移</span><span>谁写的</span><span>结局</span><span>为什么这样设计</span></div>
+    <div class="trow" role="row"><span class="cell">queued → running</span><span class="cell">worker · try_claim</span><span class="tstat yes">CAS</span><span class="cell plain">条件更新 <span class="mono">WHERE status='queued'</span>，赢的人才执行</span></div>
+    <div class="trow" role="row"><span class="cell">queued → cancelled</span><span class="cell">API · request_cancel</span><span class="tstat mid">直接结束</span><span class="cell plain">还没有写者，API 可以替它收尾</span></div>
+    <div class="trow" role="row"><span class="cell">running → finished</span><span class="cell">worker · execute_turn</span><span class="tstat yes">正常</span><span class="cell plain">终态与 RUN_FINISHED 同事务</span></div>
+    <div class="trow" role="row"><span class="cell">running → failed</span><span class="cell">worker · 兜底 except</span><span class="tstat no">失败</span><span class="cell plain">异常只进日志，原始文本不出网关</span></div>
+    <div class="trow" role="row"><span class="cell">running → cancelled</span><span class="cell">worker · 读到取消标记</span><span class="tstat mid">取消</span><span class="cell plain">API 只留一个标记，写者自己收尾</span></div>
+    <div class="trow" role="row"><span class="cell">running → interrupted</span><span class="cell">sweeper / worker.stop</span><span class="tstat no">中断</span><span class="cell plain">心跳停了，或者进程正在退出</span></div>
+  </div>
+
+  <div class="note"><b>取消为什么要分两种？</b>queued 的 run 还没有写者，API 可以一条 UPDATE 直接结束它；running 的 run 已经有人在写日志，API 只能放一个标记，由<em>持有写序的人</em>写下最后一条事件——否则两个进程会各写一个结局。</div>
+
+  <h2 class="mhead">没人看着的时候</h2>
+  <p class="msub">崩溃不会自己善后。每个 worker 都会定期扫一遍日志，做三件补救。</p>
+
+  <div class="threecol">
+    <div class="panel">
+      <h3>心跳停了 → 判死</h3>
+      <p>认领时记下 owner 与租约；每次写帧刷新一次心跳。<b>90 秒没有心跳</b>的 running 行改判 <span class="mono">interrupted</span>，并补一条 <span class="mono">RUN_ERROR(worker_lost)</span>。</p>
+    </div>
+    <div class="panel">
+      <h3>queued 太久 → 补喊</h3>
+      <p>登记成功但唤醒丢了：行还是 <span class="mono">queued</span>，只是没人知道。<b>超过 15 秒</b>就重新 XADD 并记下已喊过，下一轮不会重复喊。</p>
+    </div>
+    <div class="panel">
+      <h3>会话租约 → 回收</h3>
+      <p>一个会话同时只跑一个 turn。租约表不能靠进程内锁，因为两个进程的锁互不认识；<b>过期的租约由 sweeper 清掉</b>。</p>
+    </div>
+  </div>
+
+  <div class="note"><b>API 重启不再堵漏：</b>S14 时启动会把遗留的 running 全部改成 interrupted——那是单进程才成立的假设。现在那些行可能正被一个活着的 worker 执行，判断「死没死」只能看心跳，所以这件事交给了 sweeper。</div>
+
+  <h2 class="mhead">部署：四个进程、两份存储</h2>
+  <p class="msub">API 与 worker 是同一个镜像、两个命令；它们只共享 <span class="mono">./data</span> 下的 SQLite 文件和同一个 Redis。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 320" role="img" aria-label="S15 部署图。顶部一行是 API 8010、Redis 7.4、worker、Qdrant 服务；API 用 XADD 发送唤醒，worker 用 XREADGROUP 领取。API 与 worker 都读写同一份 runs.sqlite3 卷：API 登记与读取，worker 认领、追加事件与刷新心跳。API 与 worker 都向 Qdrant 做检索；worker 旁的 index-cache 只用来校验索引指纹，不重建索引。">
+        <defs>
+          <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+          <marker id="arr3-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="arr3-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--good)"/></marker>
+        </defs>
+
+        <rect x="40" y="40" width="200" height="90" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="56" y="66">API :8010</text>
+        <text class="box-sub" x="56" y="86">登记 · 入队 · 读 journal</text>
+        <text class="box-sub" x="56" y="104">queue_enabled = true</text>
+
+        <rect x="320" y="40" width="180" height="90" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="336" y="66">Redis 7.4</text>
+        <text class="box-sub" x="336" y="86">Streams · AOF</text>
+        <text class="box-sub" x="336" y="104">只存唤醒消息</text>
+
+        <rect x="580" y="40" width="200" height="90" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="596" y="66">worker</text>
+        <text class="box-sub" x="596" y="86">python -m harbor.worker</text>
+        <text class="box-sub" x="596" y="104">执行 · 心跳 · 清扫</text>
+
+        <rect x="840" y="40" width="130" height="90" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="852" y="66">Qdrant</text>
+        <text class="box-sub" x="852" y="86">server 模式</text>
+        <text class="box-sub" x="852" y="104">向量检索</text>
+
+        <rect x="320" y="210" width="300" height="80" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="338" y="236">runs.sqlite3（./data）</text>
+        <text class="box-sub" x="338" y="256">run_events · runs · session_leases</text>
+        <text class="box-sub" x="338" y="274">唯一真相，两个进程都看得见</text>
+
+        <rect x="700" y="210" width="270" height="80" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="716" y="236">index-cache（命名卷）</text>
+        <text class="box-sub" x="716" y="256">fingerprint 必须与 API 一致</text>
+        <text class="box-sub" x="716" y="274">worker 不建索引、不探测额度</text>
+
+        <line x1="240" y1="85" x2="318" y2="85" stroke="var(--muted)" marker-end="url(#arr3)"/>
+        <text class="edge-label" x="246" y="76">XADD</text>
+
+        <line x1="500" y1="85" x2="578" y2="85" stroke="var(--muted)" marker-end="url(#arr3)"/>
+        <text class="edge-label" x="506" y="76">XREADGROUP</text>
+
+        <line x1="240" y1="115" x2="318" y2="222" stroke="var(--muted)" marker-end="url(#arr3)"/>
+        <text class="edge-label" x="236" y="176">INSERT · list_events</text>
+
+        <line x1="680" y1="210" x2="680" y2="132" stroke="var(--muted)" marker-end="url(#arr3)"/>
+        <text class="edge-label" x="688" y="176">CAS · append · heartbeat</text>
+
+        <polyline points="140,40 140,20 905,20 905,38" fill="none" stroke="var(--muted)" marker-end="url(#arr3)"/>
+        <text class="edge-label" x="470" y="15">检索（读）</text>
+
+        <line x1="780" y1="120" x2="860" y2="212" stroke="var(--muted)" marker-end="url(#arr3)"/>
+        <text class="edge-label" x="812" y="170">校验指纹</text>
+      </svg>
+    </div>
+    <figcaption><b>为什么不能各用各的 Qdrant 本地目录？</b>local-path 模式是单进程独占：API 与 worker 同时打开会互相挡住。所以部署里换成 <span class="mono">HARBOR_QDRANT_URL</span> 指向 server，worker 设 <span class="mono">HARBOR_INDEX_BUILD_ENABLED=false</span>——它只读索引，也因此跳过了启动时的 embedding 探测。</figcaption>
+  </figure>
+
+  <div class="twocol">
+    <div class="panel">
+      <h3>两个命令，一个镜像</h3>
+      <p>API 跑 <span class="mono">uvicorn harbor.main:create_app</span>，worker 跑 <span class="mono">python -m harbor.worker</span>。<b>没有配置模型时 worker 拒绝启动</b>——一个回答不了问题的进程不该领任务。</p>
+    </div>
+    <div class="panel">
+      <h3>滚动发布的收尾</h3>
+      <p>收到 SIGTERM 后，worker 停止领取，把自己正在执行的 run 写成 <span class="mono">interrupted(server_restarted)</span>。<b>行不会悬在 running 上</b>，重启后的回放也有结局。</p>
+    </div>
+  </div>
+
+  <div class="note"><b>一条回归测试值得记住：</b>跟随者「查日志」和「查状态」是两次读，不是一个快照。worker 可能恰好在这两次之间写完整个结尾——所以看到终态后必须<b>再读一次日志</b>，否则读者会漏掉结局。这条竞争曾被当作偶发失败；现在由 <span class="mono">test_a_reader_does_not_miss_events_written_while_it_checks_the_status</span> 固定下来。</div>
+  <div class="note"><b>四个泳道只有一处共享：</b>SQLite 文件。队列可以丢、可以重复，订阅者可以随时来去；只要那行还在、日志还完整，run 就一定能被重放或补救。</div>
+</main>

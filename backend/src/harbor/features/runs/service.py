@@ -18,33 +18,38 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 from harbor.features.runs import agui
+from harbor.features.runs.executor import (
+    TERMINAL_STATUSES,
+    TextObserver,
+    ToolObserver,
+    ToolResults,
+    TurnRunner,
+    execute_turn,
+    snapshot,
+)
+from harbor.features.runs.queue import RunQueue
 from harbor.features.runs.store import RunExists, RunNotFound, RunRecord, SqliteRunStore
 
 logger = logging.getLogger(__name__)
 
-ToolResults = list[dict]
-ToolObserver = Callable[[ToolResults], Awaitable[None]]
-TextObserver = Callable[[str], Awaitable[None]]
-TurnRunner = Callable[
-    [str, str, str, ToolObserver | None, TextObserver],
-    Awaitable[Any],
+__all__ = [
+    "RunHandle",
+    "RunManager",
+    "TextObserver",
+    "ToolObserver",
+    "ToolResults",
+    "TurnRunner",
 ]
 
 _CLOSED = object()
-
-_ERRORS: dict[str, tuple[str, str]] = {
-    "ModelTimeoutError": ("MODEL_TIMEOUT", "模型响应超时"),
-    "ModelFailureError": ("MODEL_FAILED", "模型调用失败"),
-    "ToolFailureError": ("TOOL_FAILED", "商品检索工具调用失败"),
-    "NoStructuredOutputError": ("NO_STRUCTURED_OUTPUT", "模型未产出结构化输出"),
-    "ContextCapacityError": ("CONTEXT_CAPACITY", "上下文超出容量限制"),
-}
 
 
 def _offer(queue: asyncio.Queue, item: Any) -> None:
@@ -58,44 +63,6 @@ def _offer(queue: asyncio.Queue, item: Any) -> None:
         queue.put_nowait(item)
     except asyncio.QueueFull:
         pass
-
-
-def _error_for(exc: BaseException) -> tuple[str, str]:
-    code, message = _ERRORS.get(type(exc).__name__, ("TURN_FAILED", "本轮处理失败"))
-    # The exception text can name filesystem paths or provider internals; it
-    # stays in the server log, never in the buyer-facing stream.
-    logger.warning("run turn failed (%s)", type(exc).__name__, exc_info=exc)
-    return code, message
-
-
-def _final_text(response: Any) -> str:
-    if response is None:
-        return ""
-    if isinstance(response, dict):
-        return str(response.get("final_text") or "")
-    return str(getattr(response, "final_text", "") or "")
-
-
-def _snapshot(response: Any, status: str) -> dict[str, Any]:
-    """The structured state a client rebuilds from; text is never parsed.
-
-    Card fields keep the response's snake_case so the frontend can reuse the
-    OpenAPI-generated ``ProductCard`` type unchanged.
-    """
-    if response is None:
-        data: dict[str, Any] = {}
-    elif hasattr(response, "model_dump"):
-        data = response.model_dump(mode="json")
-    elif isinstance(response, dict):
-        data = response
-    else:
-        data = {}
-    return {
-        "status": status,
-        "final_text": data.get("final_text", ""),
-        "cards": data.get("cards", []),
-        "pending_draft": data.get("pending_draft"),
-    }
 
 
 @dataclass
@@ -120,6 +87,8 @@ class _ActiveRun:
     # (a client cancel, or the event loop tearing down a finished task) must
     # not narrate a second ending.
     terminal: bool = False
+    terminal_status: str | None = None
+    terminal_error: str | None = None
     cancelling: bool = False
     task: asyncio.Task | None = None
 
@@ -130,14 +99,21 @@ class RunManager:
         store: SqliteRunStore,
         turn_runner: TurnRunner,
         *,
+        queue: RunQueue | None = None,
         subscriber_buffer: int = 500,
         heartbeat_seconds: float = 15.0,
+        follow_poll_seconds: float = 0.1,
         id_factory: Callable[[], str] | None = None,
     ) -> None:
         self._store = store
         self._turn_runner = turn_runner
+        # ``queue`` selects the deployment shape. With it, this process only
+        # registers runs and tails the journal; without it, turns execute here
+        # exactly as they did before S15 (single-process development).
+        self._queue = queue
         self._buffer = subscriber_buffer
         self._heartbeat = heartbeat_seconds
+        self._follow_poll = follow_poll_seconds
         self._id_factory = id_factory or (lambda: uuid.uuid4().hex)
         self._runs: dict[str, _ActiveRun] = {}
         self._shutting_down = False
@@ -147,6 +123,11 @@ class RunManager:
     async def startup(self) -> None:
         """Close the books on runs a previous process left ``running``."""
         self._shutting_down = False
+        if self._queue is not None:
+            # Some worker may be executing those rows right now — the API has
+            # no way to tell a live one from a dead one. That is the sweeper's
+            # job (a heartbeat that stopped), not an API restart's.
+            return
         orphans = await asyncio.to_thread(self._store.interrupt_running)
         for run_id in orphans:
             await asyncio.to_thread(
@@ -174,12 +155,36 @@ class RunManager:
                 buyer_id=buyer_id,
                 shopping_session_id=session_id,
                 input_text=text,
+                # Inline mode executes here and now, so the row is live the
+                # moment it exists. In queue mode the worker is the only one
+                # that may move a run to ``running``.
+                status="running" if self._queue is None else "queued",
             )
         except RunExists:
             record = await asyncio.to_thread(self._store.get_run, run_id)
             if record is None:  # pragma: no cover - only if the row vanished
                 raise
             return RunHandle(run_id=run_id, thread_id=record.thread_id, created=False)
+
+        if self._queue is not None:
+            # Durable first, then the nudge. A client may replay from zero the
+            # moment the start response arrives, so RUN_STARTED is committed
+            # before the run is offered to any worker.
+            await asyncio.to_thread(
+                self._store.append_event,
+                run_id,
+                agui.run_started(thread_id=thread_id, run_id=run_id),
+            )
+            try:
+                await self._queue.enqueue(run_id)
+            except Exception:
+                # The row is already committed and still ``queued``; the
+                # sweeper re-sends it. Losing the nudge costs a wake-up, never
+                # a run, so the request does not fail.
+                logger.warning(
+                    "could not enqueue %s; the sweeper will retry", run_id, exc_info=True
+                )
+            return RunHandle(run_id=run_id, thread_id=thread_id)
 
         active = _ActiveRun(
             run_id=run_id,
@@ -199,6 +204,10 @@ class RunManager:
         record = await asyncio.to_thread(self._store.get_run, run_id)
         if record is None:
             raise RunNotFound(run_id)
+        if record.status in TERMINAL_STATUSES:
+            return record
+        if self._queue is not None:
+            return await self._cancel_queued(record)
         active = self._runs.get(run_id)
         if active is None or active.done or active.terminal or active.cancelling:
             return record
@@ -209,7 +218,7 @@ class RunManager:
         # its own CancelledError handler cannot write the terminal event.
         await asyncio.sleep(0)
         if active.task is not None and active.task.done() and not active.done:
-            await self._append(active, agui.state_snapshot(_snapshot(None, "cancelled")))
+            await self._append(active, agui.state_snapshot(snapshot(None, "cancelled")))
             await self._append(
                 active,
                 agui.run_finished(
@@ -221,11 +230,43 @@ class RunManager:
             )
             active.terminal = True
             await self._finish(active, "cancelled")
-        return record
+        refreshed = await asyncio.to_thread(self._store.get_run, run_id)
+        return refreshed or record
+
+    async def _cancel_queued(self, record: RunRecord) -> RunRecord:
+        """Cancel in one of the two ways a queued or running run allows.
+
+        A queued run has no writer, so this process may end it. A running run
+        belongs to a worker: only the process holding the event log's write
+        order may narrate its ending, so it gets a flag instead and the next
+        frame it writes is the last.
+        """
+        ended = await asyncio.to_thread(self._store.request_cancel, record.run_id)
+        if ended:
+            await asyncio.to_thread(
+                self._store.append_event,
+                record.run_id,
+                agui.state_snapshot(snapshot(None, "cancelled")),
+            )
+            await asyncio.to_thread(
+                self._store.append_event,
+                record.run_id,
+                agui.run_finished(
+                    thread_id=record.thread_id,
+                    run_id=record.run_id,
+                    result={"status": "cancelled"},
+                ),
+                status="cancelled",
+            )
+        refreshed = await asyncio.to_thread(self._store.get_run, record.run_id)
+        return refreshed or record
 
     async def shutdown(self) -> None:
         """Stop in-flight turns and mark them interrupted (not user-cancelled)."""
         self._shutting_down = True
+        if self._queue is not None:
+            # Rows belong to workers now; a restart here strands nothing.
+            return
         tasks = [active.task for active in self._runs.values() if active.task is not None]
         for task in tasks:
             task.cancel()
@@ -256,6 +297,11 @@ class RunManager:
         record = await asyncio.to_thread(self._store.get_run, run_id)
         if record is None:
             raise RunNotFound(run_id)
+
+        if self._queue is not None:
+            async for item in self._follow_journal(run_id, after_seq):
+                yield item
+            return
 
         active = self._runs.get(run_id)
         queue: asyncio.Queue | None = None
@@ -291,6 +337,49 @@ class RunManager:
                 async with active.lock:
                     active.subscribers.discard(queue)
 
+    async def _follow_journal(
+        self, run_id: str, after_seq: int
+    ) -> AsyncIterator[tuple[int, dict] | None]:
+        """Tail the log the worker is writing.
+
+        Polling looks like the cheap option and is the robust one: there is no
+        handshake to lose, so a Redis outage, an API restart or a follower that
+        joined late all cost the same — the next poll picks up where the last
+        one stopped. Two readers need no coordination either.
+        """
+        last_seq = after_seq
+        last_beat = time.monotonic()
+        while True:
+            events = await asyncio.to_thread(self._store.list_events, run_id, after_seq=last_seq)
+            for seq, event in events:
+                last_seq = seq
+                last_beat = time.monotonic()
+                yield (seq, event)
+                if event.get("type") in ("RUN_FINISHED", "RUN_ERROR"):
+                    return
+            if events:
+                continue
+            record = await asyncio.to_thread(self._store.get_run, run_id)
+            if record is None:  # pragma: no cover - the row does not disappear
+                raise RunNotFound(run_id)
+            if record.status in TERMINAL_STATUSES:
+                # The empty poll and the status read are two statements, so
+                # they are not one snapshot: the worker may have written the
+                # rest of the journal in between. A terminal status means the
+                # log is final, so drain it once before closing — returning
+                # here would drop the ending for a reader who arrived a
+                # moment too early.
+                for seq, event in await asyncio.to_thread(
+                    self._store.list_events, run_id, after_seq=last_seq
+                ):
+                    last_seq = seq
+                    yield (seq, event)
+                return
+            await asyncio.sleep(self._follow_poll)
+            if time.monotonic() - last_beat >= self._heartbeat:
+                last_beat = time.monotonic()
+                yield None
+
     async def get_run(self, run_id: str) -> RunRecord:
         record = await asyncio.to_thread(self._store.get_run, run_id)
         if record is None:
@@ -311,6 +400,11 @@ class RunManager:
             seq = await asyncio.to_thread(
                 self._store.append_event, active.run_id, event, status=status, error=error
             )
+            if status in TERMINAL_STATUSES:
+                # The ending is durable; from here the run is over on the wire.
+                active.terminal = True
+                active.terminal_status = status
+                active.terminal_error = error
             for queue in list(active.subscribers):
                 _offer(queue, (seq, event))
             return seq
@@ -350,95 +444,33 @@ class RunManager:
         self._mark_done(active)
 
     async def _execute(self, active: _ActiveRun) -> None:
-        message_id = f"msg_{active.run_id}"
-        text_open = False
+        """Run the turn, fanning each durable event out to live subscribers.
 
-        async def observer(records: ToolResults) -> None:
-            for record in records:
-                call_id = str(record.get("id") or f"call_{self._id_factory()[:8]}")
-                name = str(record.get("name") or "tool")
-                await self._append(
-                    active,
-                    agui.tool_call_start(call_id, name, parent_message_id=message_id),
-                )
-                arguments = record.get("arguments")
-                if arguments:
-                    await self._append(active, agui.tool_call_args(call_id, str(arguments)))
-                await self._append(active, agui.tool_call_end(call_id))
-                await self._append(
-                    active,
-                    agui.tool_call_result(
-                        f"msg_{call_id}", call_id, str(record.get("output") or "")
-                    ),
-                )
-
+        The sequence itself lives in ``executor.execute_turn`` (shared with the
+        S15 worker); this method owns only the in-memory half — notifying
+        subscribers, and the shielded status write that lets a cancellation
+        land without stranding the row in ``running``.
+        """
         try:
-            await self._append(active, agui.step_started("agent"))
-            await self._append(active, agui.text_message_start(message_id))
-            text_open = True
-
-            async def on_text_delta(delta: str) -> None:
-                # Persist-before-broadcast applies to narration too: a refresh
-                # mid-turn must replay the same words the live stream showed.
-                await self._append(active, agui.text_message_content(message_id, delta))
-
-            response = await self._turn_runner(
-                active.buyer_id, active.session_id, active.text, observer, on_text_delta
+            status = await execute_turn(
+                run_id=active.run_id,
+                thread_id=active.thread_id,
+                buyer_id=active.buyer_id,
+                session_id=active.session_id,
+                text=active.text,
+                turn_runner=self._turn_runner,
+                append=partial(self._append, active),
+                id_factory=self._id_factory,
+                shutting_down=lambda: self._shutting_down,
             )
-            final_text = _final_text(response)
-            if final_text:
-                await self._append(active, agui.text_message_content(message_id, final_text))
-            await self._append(active, agui.text_message_end(message_id))
-            text_open = False
-            await self._append(active, agui.state_snapshot(_snapshot(response, "finished")))
-            await self._append(active, agui.step_finished("agent"))
-            await self._append(
-                active,
-                agui.run_finished(
-                    thread_id=active.thread_id,
-                    run_id=active.run_id,
-                    result={"status": "finished"},
-                ),
-                status="finished",
-            )
-            active.terminal = True
-            await self._finish(active, "finished")
         except asyncio.CancelledError:
-            if active.terminal or active.done:
-                # The run already ended on the wire; this cancellation is
-                # cleanup (a finished task being torn down), not a command.
-                self._mark_done(active)
+            if active.done:
                 return
-            if text_open:
-                await self._append(active, agui.text_message_end(message_id))
-            if self._shutting_down:
-                await self._append(
-                    active,
-                    agui.run_error("server_restarted", code="RUN_INTERRUPTED"),
-                    status="interrupted",
-                    error="server_restarted",
-                )
-                active.terminal = True
-                await self._finish(active, "interrupted", error="server_restarted")
+            if active.terminal_status is not None:
+                await self._finish(active, active.terminal_status, error=active.terminal_error)
             else:
-                await self._append(active, agui.state_snapshot(_snapshot(None, "cancelled")))
-                await self._append(
-                    active,
-                    agui.run_finished(
-                        thread_id=active.thread_id,
-                        run_id=active.run_id,
-                        result={"status": "cancelled"},
-                    ),
-                    status="cancelled",
-                )
-                active.terminal = True
-                await self._finish(active, "cancelled")
-        except Exception as exc:  # noqa: BLE001 - every failure becomes RUN_ERROR
-            if text_open:
-                await self._append(active, agui.text_message_end(message_id))
-            code, message = _error_for(exc)
-            await self._append(
-                active, agui.run_error(message, code=code), status="failed", error=code
-            )
-            active.terminal = True
-            await self._finish(active, "failed", error=code)
+                # Cancelled before any write landed, so there is no ending on
+                # the wire to preserve and no row left to reconcile.
+                self._mark_done(active)
+            return
+        await self._finish(active, status)
