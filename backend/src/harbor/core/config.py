@@ -145,6 +145,15 @@ class Settings(BaseSettings):
     guard_tool_output_max_chars: int = Field(default=8000, ge=1)
     guard_reply_max_chars: int = Field(default=4000, ge=1)
 
+    # S13: observability. One process-wide instance backs the trace store,
+    # metric registry and event bus. The kill switch leaves the endpoints
+    # mounted but reporting ``enabled: false``.
+    observability_enabled: bool = True
+    observability_trace_buffer: int = Field(default=256, ge=1)
+    observability_event_buffer: int = Field(default=200, ge=1)
+    observability_metric_window: int = Field(default=512, ge=1)
+    observability_event_heartbeat_seconds: float = Field(default=15.0, gt=0)
+
     # S9: multi-agent dispatch. The batch budget must fit inside the parent
     # turn, or a slow batch would turn the whole request into a 504 (S9-4).
     dispatch_enabled: bool = True

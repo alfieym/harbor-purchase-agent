@@ -37,6 +37,7 @@ from harbor.guardrails.events import log_guard_event
 from harbor.guardrails.output import GroundingFacts, OutputGuard
 from harbor.guardrails.runtime import GuardRuntime
 from harbor.guardrails.session import GuardSession
+from harbor.observability import publish_event, span, trace_scope
 
 logger = logging.getLogger(__name__)
 
@@ -259,9 +260,7 @@ async def _order_facts(
     prices: set[tuple[str, Decimal]] = set()
     for order_id in set(_ORDER_ID.findall(text)):
         try:
-            order, _request = await order_service.get_order(
-                order_id=order_id, buyer_id=buyer_id
-            )
+            order, _request = await order_service.get_order(order_id=order_id, buyer_id=buyer_id)
         except Exception:  # noqa: BLE001 — an unknown order is an ungrounded claim
             continue
         prices.add((order.currency, order.total))
@@ -305,6 +304,71 @@ async def run_turn(
     timeout_seconds: float = 120.0,
     order_service: OrderService | None = None,
 ) -> CommerceIntentResponse:
+    """Run one turn and record its trace, metrics and user-visible events (S13).
+
+    The wrapper owns the trace so the whole turn — budget gate, model loop,
+    guard repair and persistence — is attributable even when the turn fails.
+    ``turn.answer_ready`` is what the buyer is shown; it is published only after
+    the response is fully assembled, so the stream never shows an answer the
+    client would not receive.
+    """
+    with trace_scope("turn", session_id=shopping_session_id, buyer_id=buyer_id) as turn_span:
+        publish_event(
+            "turn.started",
+            session_id=shopping_session_id,
+            buyer_id=buyer_id,
+            query_chars=len(raw_query),
+        )
+        try:
+            response = await _run_turn(
+                store,
+                buyer_id,
+                shopping_session_id,
+                raw_query,
+                timeout_seconds=timeout_seconds,
+                order_service=order_service,
+            )
+        except (Exception, asyncio.CancelledError) as exc:
+            turn_span.fail(type(exc).__name__)
+            publish_event(
+                "turn.failed",
+                session_id=shopping_session_id,
+                # The buyer-visible stream gets a stable code. The full message
+                # can name filesystem paths or provider internals; it stays in
+                # the span's error text, which is internal.
+                error=type(exc).__name__,
+            )
+            raise
+        turn_span.attributes["outcome"] = "ok"
+        turn_span.attributes["card_count"] = len(response.cards)
+        turn_span.attributes["text_chars"] = len(response.final_text)
+        publish_event(
+            "turn.answer_ready",
+            session_id=shopping_session_id,
+            final_text=response.final_text,
+            card_count=len(response.cards),
+            cards=[
+                {
+                    "title": card.title,
+                    "price_major": card.price_major,
+                    "currency": card.currency,
+                    "sku_id": card.sku_id,
+                }
+                for card in response.cards
+            ],
+            pending_draft=response.pending_draft is not None,
+        )
+        return response
+
+
+async def _run_turn(
+    store: SessionStore,
+    buyer_id: str,
+    shopping_session_id: str,
+    raw_query: str,
+    timeout_seconds: float = 120.0,
+    order_service: OrderService | None = None,
+) -> CommerceIntentResponse:
     """Run one conversational turn and return the model's product cards.
 
     With ``order_service`` wired (S10), the response also carries the session's
@@ -322,10 +386,16 @@ async def run_turn(
     ):
         store.guard.metrics.incr("budget.exhausted")
         log_guard_event("budget.exhausted", reason="turn_fallback")
+        publish_event(
+            "turn.short_circuit",
+            session_id=shopping_session_id,
+            reason="turn_fallback",
+        )
         return CommerceIntentResponse(final_text=store.guard.rule_fallback_text(), cards=[])
 
     while True:
-        key, session = await store.get_or_create(buyer_id, shopping_session_id)
+        with span("session.get_or_create"):
+            key, session = await store.get_or_create(buyer_id, shopping_session_id)
         try:
             async with session.lock:
                 # A concurrent failed turn on this key may have evicted the session
@@ -348,27 +418,29 @@ async def run_turn(
                     for block in msg.get_content_blocks("tool_result")
                     if getattr(block, "id", None) is not None
                 }
-                try:
-                    reply = await asyncio.wait_for(
-                        session.agent.reply(
-                            UserMsg(name="user", content=raw_query),
-                            structured_schema=ProductCardList,
-                        ),
-                        timeout=timeout_seconds,
-                    )
-                except TimeoutError as exc:
-                    raise ModelTimeoutError(timeout_seconds) from exc
-                except ContextCapacityError:
-                    # S7: a capacity failure is its own contract (507), not a
-                    # generic model failure (502).
-                    raise
-                except Exception as exc:
-                    # AgentScope re-raises model-call failures (network / rate-limit /
-                    # provider 5xx) out of ``reply``; surface them as a structured error
-                    # rather than leaking an unhandled 500 (S5-2). Log the real cause
-                    # server-side for ops while the client sees a clean 502.
-                    logger.exception("model call failed for session %r", key)
-                    raise ModelFailureError() from exc
+                with span("agent.reply") as reply_span:
+                    try:
+                        reply = await asyncio.wait_for(
+                            session.agent.reply(
+                                UserMsg(name="user", content=raw_query),
+                                structured_schema=ProductCardList,
+                            ),
+                            timeout=timeout_seconds,
+                        )
+                    except TimeoutError as exc:
+                        raise ModelTimeoutError(timeout_seconds) from exc
+                    except ContextCapacityError:
+                        # S7: a capacity failure is its own contract (507), not a
+                        # generic model failure (502).
+                        raise
+                    except Exception as exc:
+                        # AgentScope re-raises model-call failures (network / rate-limit /
+                        # provider 5xx) out of ``reply``; surface them as a structured error
+                        # rather than leaking an unhandled 500 (S5-2). Log the real cause
+                        # server-side for ops while the client sees a clean 502.
+                        logger.exception("model call failed for session %r", key)
+                        raise ModelFailureError() from exc
+                    reply_span.attributes["context_messages"] = len(session.agent.state.context)
                 # AgentScope converts a tool exception into an ERROR ``tool_result``
                 # stored in the conversation context — *not* on the returned ``reply``,
                 # which only carries the final text answer. Detect any ERROR produced
@@ -384,9 +456,7 @@ async def run_turn(
                     # did — a missing structured reply must stay a 502.
                     if store.guard is not None and store.guard.switches.structure:
                         store.guard.metrics.incr("reply.assertion_failed")
-                        log_guard_event(
-                            "reply.assertion_failed", reason="no_structured_output"
-                        )
+                        log_guard_event("reply.assertion_failed", reason="no_structured_output")
                     raise NoStructuredOutputError(reply.get_text_content() or "")
                 cards = ProductCardList.model_validate(structured)
                 # The model can copy cards from an earlier turn's structured
@@ -397,40 +467,44 @@ async def run_turn(
                 summary = cards.summary
                 guarded_cards: list[ProductCard] = grounded
                 if store.guard is not None and store.guard.switches.output_guard:
-                    evidence = search_evidence_from_context(session.agent.state.context)
-                    reply_text = " ".join(
-                        [cards.summary, *(h for card in grounded for h in card.highlights)]
-                    )
-                    confirmed, cancelled, order_prices = await _order_facts(
-                        order_service, buyer_id, reply_text
-                    )
-                    # One fact set from three real sources: this session's
-                    # searches, the child agents' verified refs, and the
-                    # stored order rows the reply refers to.
-                    prices = frozenset(
-                        {(item.currency, item.unit_price) for item in evidence}
-                        | dispatch_prices_from_context(session.agent.state.context)
-                        | order_prices
-                    )
-                    summary, guarded_cards = _guard_output(
-                        store.guard,
-                        cards.summary,
-                        grounded,
-                        GroundingFacts(
-                            prices=prices,
-                            has_confirmed_order=confirmed,
-                            has_cancelled_order=cancelled,
-                        ),
-                    )
+                    with span("turn.output_guard"):
+                        evidence = search_evidence_from_context(session.agent.state.context)
+                        reply_text = " ".join(
+                            [cards.summary, *(h for card in grounded for h in card.highlights)]
+                        )
+                        with span("turn.order_facts"):
+                            confirmed, cancelled, order_prices = await _order_facts(
+                                order_service, buyer_id, reply_text
+                            )
+                        # One fact set from three real sources: this session's
+                        # searches, the child agents' verified refs, and the
+                        # stored order rows the reply refers to.
+                        prices = frozenset(
+                            {(item.currency, item.unit_price) for item in evidence}
+                            | dispatch_prices_from_context(session.agent.state.context)
+                            | order_prices
+                        )
+                        summary, guarded_cards = _guard_output(
+                            store.guard,
+                            cards.summary,
+                            grounded,
+                            GroundingFacts(
+                                prices=prices,
+                                has_confirmed_order=confirmed,
+                                has_cancelled_order=cancelled,
+                            ),
+                        )
                 response = CommerceIntentResponse(final_text=summary, cards=guarded_cards)
                 # S10: attach the draft before persisting so the journal records
                 # what the buyer was shown. A read failure must not lose the
                 # model's answer or the session, so it degrades to "no draft".
                 if order_service is not None:
-                    response = await _with_pending_draft(
-                        response, order_service, buyer_id, shopping_session_id
-                    )
-                await store.persist(key, session.agent, raw_query, response)
+                    with span("turn.pending_draft"):
+                        response = await _with_pending_draft(
+                            response, order_service, buyer_id, shopping_session_id
+                        )
+                with span("turn.persist"):
+                    await store.persist(key, session.agent, raw_query, response)
                 return response
         except Exception:
             # A failed turn must not leave a half-updated session in memory: evict so

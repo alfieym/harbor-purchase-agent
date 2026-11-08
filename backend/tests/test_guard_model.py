@@ -89,3 +89,21 @@ def test_budget_tiers_select_model(tmp_path) -> None:
     g = GuardedChatModel(primary, rt, request_timeout=1, max_retries=0, backoff=0.0)
     g._model_factory = lambda name: lite if name == "lite-1" else primary
     assert _text(asyncio.run(g(_msgs()))) == "b"
+
+
+class _Formatter:
+    supported_input_media_types = ("image/*", "audio/*", "video/*")
+
+
+def test_guarded_model_exposes_the_delegate_formatter(tmp_path) -> None:
+    # AgentScope's Agent reads ``self.model.formatter`` to decide which input
+    # media to accept. The wrapper replaces the provider model, so it has to
+    # pass the provider's formatter through or every real turn crashes.
+    delegate = FakeModel("m", ["ok"])
+    delegate.formatter = _Formatter()
+
+    guarded = GuardedChatModel(
+        delegate, _runtime(tmp_path), request_timeout=1, max_retries=0, backoff=0.0
+    )
+
+    assert guarded.formatter is delegate.formatter

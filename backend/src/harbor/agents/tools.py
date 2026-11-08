@@ -22,6 +22,7 @@ from harbor.features.catalog.models import ProductSearchSpec
 from harbor.features.catalog.search.fx import convert
 from harbor.features.catalog.search.schemas import SearchResult
 from harbor.features.orders.models import SearchEvidence
+from harbor.observability import incr, publish_event, span
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,15 @@ class FixedSearchConstraints:
     currency: str = "CNY"
     weight_max_kg: float | None = None
     excluded_material_tags: tuple[str, ...] = ()
+
+
+def _session_id(state: AgentState | None) -> str | None:
+    """The shopping session this tool call belongs to, if one is injected."""
+    identity = state.middle_context.get(IDENTITY_STATE_KEY) if state is not None else None
+    if not isinstance(identity, dict):
+        return None
+    session = identity.get("shopping_session_id")
+    return session if isinstance(session, str) else None
 
 
 async def _record_search_evidence(
@@ -192,9 +202,32 @@ def make_product_search_tool(
         )
         # ``service.search`` is synchronous (Qdrant + embedding HTTP), so offload
         # it to a worker thread — otherwise it blocks the event loop and two
-        # concurrent sessions serialize on it (S5-4).
-        result = await asyncio.to_thread(service.search, query, spec, 10)
-        payload = _search_result_to_dict(result, currency)
+        # concurrent sessions serialize on it (S5-4). The span wraps the await
+        # so it measures retrieval wall time, including the thread hop (S13).
+        with span(
+            "tool.product_search",
+            query_chars=len(query),
+            category=category,
+            currency=currency,
+        ) as search_span:
+            result = await asyncio.to_thread(service.search, query, spec, 10)
+            payload = _search_result_to_dict(result, currency)
+            search_span.attributes.update(
+                hits=len(result.hits),
+                total=result.total,
+                recall_strategy=result.recall_strategy,
+            )
+            incr("tool.search.calls")
+            if not result.hits:
+                incr("tool.search.empty")
+            publish_event(
+                "tool.search.completed",
+                session_id=_session_id(_agent_state),
+                hits=len(result.hits),
+                total=result.total,
+                recall_strategy=result.recall_strategy,
+                latency_ms=result.diagnostics.latency_ms,
+            )
         if evidence_recorder is not None and _agent_state is not None:
             await _record_search_evidence(evidence_recorder, _agent_state, payload["hits"])
         return ToolChunk(

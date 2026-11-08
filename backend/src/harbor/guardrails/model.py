@@ -22,10 +22,11 @@ from agentscope.model import ChatModelBase, ChatResponse
 from harbor.guardrails.budget import Admission, BudgetTier
 from harbor.guardrails.events import log_guard_event
 from harbor.guardrails.runtime import GuardRuntime
+from harbor.observability import span
+from harbor.observability.usage import record_usage
 
 MINIMAL_MODE_HINT = (
-    "当前处于预算紧张模式：最多再做一次必要检索，不要重复调用工具，"
-    "请基于已有结果直接给出简洁回复。"
+    "当前处于预算紧张模式：最多再做一次必要检索，不要重复调用工具，请基于已有结果直接给出简洁回复。"
 )
 
 
@@ -73,6 +74,12 @@ class GuardedChatModel(ChatModelBase):
         self._delegate = delegate
         self._delegate.max_retries = 0
         self._delegate.stream = False
+        # AgentScope's Agent reads ``model.formatter`` to decide which input
+        # media it can accept. The wrapper stands in for the provider model,
+        # so it must pass that provider-specific object through.
+        formatter = getattr(delegate, "formatter", None)
+        if formatter is not None:
+            self.formatter = formatter
         self.runtime = runtime
         self.request_timeout = request_timeout
         self._max_retries = max_retries
@@ -103,7 +110,11 @@ class GuardedChatModel(ChatModelBase):
     async def _settle(self, admission: Admission | None, response: ChatResponse) -> None:
         if admission is None:
             return
-        usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+        usage = (
+            response.get("usage")
+            if isinstance(response, dict)
+            else getattr(response, "usage", None)
+        )
         if usage is None:
             await self.runtime.budget.settle_async(admission.reserved, admission.reserved)
             return
@@ -138,26 +149,17 @@ class GuardedChatModel(ChatModelBase):
         switches = self.runtime.switches
         # With the budget off the model sees the pre-S11 world: no tier, no
         # admission, no per-call estimate — just the call.
-        tier = (
-            await self.runtime.budget.tier_async()
-            if switches.budget
-            else BudgetTier.MAIN
-        )
+        tier = await self.runtime.budget.tier_async() if switches.budget else BudgetTier.MAIN
         if tier is BudgetTier.FALLBACK:
             # The turn-level gate should have caught this already; if it did
             # not, still refuse rather than send a doomed request.
             raise self._exhausted("tier_fallback")
 
         selected = self.model
-        if (
-            tier in (BudgetTier.LITE, BudgetTier.MINIMAL)
-            and self.runtime.lite_model
-        ):
+        if tier in (BudgetTier.LITE, BudgetTier.MINIMAL) and self.runtime.lite_model:
             selected = self.runtime.lite_model
         if tier is not BudgetTier.MAIN:
-            reason = (
-                "budget_tier_lite" if tier is BudgetTier.LITE else "budget_tier_minimal"
-            )
+            reason = "budget_tier_lite" if tier is BudgetTier.LITE else "budget_tier_minimal"
             self._fallback_event(selected, reason, tier)
             self.runtime.last_tier = tier
 
@@ -184,15 +186,27 @@ class GuardedChatModel(ChatModelBase):
 
             for attempt in range(max_retries + 1):
                 try:
-                    response = await asyncio.wait_for(
-                        self._model_factory(name)(
-                            prepared,
-                            tools=tools,
-                            tool_choice=tool_choice,
-                            **kwargs,
-                        ),
-                        timeout=timeout,
-                    )
+                    # S13: one span per provider request, so a retry is visible
+                    # as two model.call spans rather than one long one.
+                    with span(
+                        "model.call",
+                        model=name,
+                        tier=tier.value,
+                        attempt=attempt + 1,
+                        fallback=index > 0 or skipped_for_circuit,
+                    ) as call_span:
+                        response = await asyncio.wait_for(
+                            self._model_factory(name)(
+                                prepared,
+                                tools=tools,
+                                tool_choice=tool_choice,
+                                **kwargs,
+                            ),
+                            timeout=timeout,
+                        )
+                        # S13-3: prompt/completion/cache as the provider
+                        # reported them; anything unreported stays "unknown".
+                        call_span.attributes.update(record_usage(response))
                 except asyncio.CancelledError:
                     if admission is not None:
                         await self.runtime.budget.release_async(admission.reserved)

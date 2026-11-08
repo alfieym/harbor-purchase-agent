@@ -103,6 +103,10 @@ class OrderService:
         self._store = store
         self._evidence = evidence
 
+    def ping(self) -> None:
+        """Raise when the order database is unreachable (the S13-4 health probe)."""
+        self._store.ping()
+
     async def create_draft(
         self,
         *,

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
-    status: Literal["ok"] = "ok"
+    status: Literal["ok", "degraded"] = "ok"
     service: str
     version: str
     environment: str

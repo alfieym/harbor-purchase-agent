@@ -265,6 +265,19 @@ class SqliteOrderStore:
 
     # -- public async API -------------------------------------------------
 
+    def ping(self) -> None:
+        """Prove the database is reachable and its schema still exists.
+
+        ``SELECT 1`` alone would answer even after the file was deleted (SQLite
+        recreates an empty one), so the probe reads a real table: a vanished
+        schema raises instead of reporting healthy.
+        """
+        conn = self._connect()
+        try:
+            conn.execute("SELECT 1 FROM order_drafts LIMIT 1").fetchall()
+        finally:
+            conn.close()
+
     async def create_draft(
         self,
         *,

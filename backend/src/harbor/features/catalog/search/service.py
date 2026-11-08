@@ -17,6 +17,7 @@ from harbor.features.catalog.search.qdrant_indexer import QdrantProductIndexer
 from harbor.features.catalog.search.qdrant_search import QdrantProductSearch
 from harbor.features.catalog.search.rerank import Reranker
 from harbor.features.catalog.search.schemas import SearchResult
+from harbor.observability import span
 
 
 class CatalogSearchService:
@@ -56,5 +57,14 @@ class CatalogSearchService:
         )
 
     def search(self, query_text: str, spec: ProductSearchSpec, limit: int = 10) -> SearchResult:
-        """Run the S3 fallback-chain recall + rerank for ``query_text`` under ``spec``."""
-        return self._search.search(query_text, spec, limit=limit)
+        """Run the S3 fallback-chain recall + rerank for ``query_text`` under ``spec``.
+
+        S13: the span runs in the worker thread the tool offloaded the call to,
+        and contextvars carry the parent span across that hop, so the trace
+        separates embedding/retrieval time from the tool's own overhead.
+        """
+        with span("search.retrieve", query_chars=len(query_text), limit=limit) as search_span:
+            result = self._search.search(query_text, spec, limit=limit)
+            search_span.attributes["hits"] = len(result.hits)
+            search_span.attributes["recall_strategy"] = result.recall_strategy
+            return result

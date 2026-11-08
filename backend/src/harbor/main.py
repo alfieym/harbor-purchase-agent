@@ -18,6 +18,9 @@ from harbor.features.orders.evidence import SqliteEvidenceStore
 from harbor.features.orders.router import router as orders_router
 from harbor.features.orders.service import OrderService
 from harbor.features.orders.store import SqliteOrderStore
+from harbor.observability import Observability, configure_observability
+from harbor.observability.middleware import observability_middleware
+from harbor.observability.router import router as observability_router
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.app_version,
         settings.app_env,
     )
+    # S13: install the three observability lines before anything else runs, so
+    # startup work and the first request both have a trace and a metric sink.
+    observability = (
+        Observability.create(
+            trace_buffer=settings.observability_trace_buffer,
+            event_buffer=settings.observability_event_buffer,
+            metric_window=settings.observability_metric_window,
+        )
+        if settings.observability_enabled
+        else None
+    )
+    previous_observability = configure_observability(observability)
+    app.state.observability = observability
     # S6: the repository is cheap and always available; the chat store needs a model.
     repo = SessionRepository(settings.sessions_dir)
     app.state.session_repository = repo
@@ -60,6 +76,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.chat_store = None
         app.state.runtime = None
     yield
+    # Restore whatever instance was active before this app assembled, so nested
+    # TestClients or embedded apps do not keep a shutdown instance installed.
+    configure_observability(previous_observability)
+    # The router must not keep serving a shut-down instance's data.
+    app.state.observability = None
     logger.info("Stopping %s", settings.app_name)
 
 
@@ -76,6 +97,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
     )
     app.state.settings = cfg
+    # Set before the lifespan runs: until this app installs its own instance,
+    # the observability routes report disabled rather than borrowing another
+    # app's process-global instance.
+    app.state.observability = None
 
     app.add_middleware(
         CORSMiddleware,
@@ -85,6 +110,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     install_error_handlers(app)
+    # S13: correlate every request with a trace id (incoming X-Request-ID wins)
+    # and expose the trace back to the caller on the response.
+    app.middleware("http")(observability_middleware)
     # The S5 checklist contract is root-level (/commerce/intents, /health), while
     # the existing frontend + tests use the /api prefix for health. Mount health
     # under both, and the commerce endpoint at its checklist path.
@@ -97,5 +125,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # S11: independent of ``llm_configured`` — with no runtime it reports
     # ``enabled: false`` rather than 404, so ops can tell "off" from "missing".
     app.include_router(guardrails_router, prefix=cfg.api_prefix)
+    # S13: trace, metrics and the event stream. Independent of the runtime, so
+    # a deployment without a model still reports its own health.
+    app.include_router(observability_router, prefix=cfg.api_prefix)
 
     return app
