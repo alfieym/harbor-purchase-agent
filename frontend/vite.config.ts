@@ -16,6 +16,13 @@ export default defineConfig(({ mode }) => {
           target: env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8010',
           changeOrigin: true,
         },
+        // AG-UI runs stream over SSE; ``ws: false`` keeps the response a
+        // plain chunked body so the browser can read it incrementally.
+        '/agui': {
+          target: env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8010',
+          changeOrigin: true,
+          ws: false,
+        },
       },
     },
   }

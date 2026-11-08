@@ -12,12 +12,20 @@ import asyncio
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 from agentscope.agent import Agent
-from agentscope.message import ToolResultState, UserMsg
+from agentscope.event import (
+    EventBase,
+    ModelCallEndEvent,
+    ModelCallStartEvent,
+    TextBlockDeltaEvent,
+    ToolCallStartEvent,
+)
+from agentscope.message import Msg, ToolResultState, UserMsg
 from agentscope.state import AgentState
 
 from harbor.agents.cards import ProductCard, ProductCardList
@@ -40,6 +48,14 @@ from harbor.guardrails.session import GuardSession
 from harbor.observability import publish_event, span, trace_scope
 
 logger = logging.getLogger(__name__)
+
+
+ToolResultsObserver = Callable[[list[dict]], Awaitable[None]]
+TextDeltaObserver = Callable[[str], Awaitable[None]]
+
+# AgentScope asks for the structured reply through this tool; a model call
+# that requests it is the one producing the answer, not narration.
+STRUCTURED_OUTPUT_TOOL = "GenerateStructuredOutput"
 
 
 class ModelTimeoutError(Exception):
@@ -296,6 +312,48 @@ def _guard_output(
     return checked.text, guarded
 
 
+def _output_text(output: Any) -> str:
+    """Flatten a tool result's content blocks to the text the model saw."""
+    if isinstance(output, str):
+        return output
+    if isinstance(output, list):
+        return "\n".join(
+            part.get("text", "") if isinstance(part, dict) else getattr(part, "text", "")
+            for part in output
+        ).strip()
+    return "" if output is None else str(output)
+
+
+async def _notify_tool_results(
+    observer: ToolResultsObserver, context: Sequence[Any], results: Sequence[Any]
+) -> None:
+    """Describe this turn's tool traffic for a transport observer (S14).
+
+    The call block supplies ``arguments``; AgentScope stores it JSON-encoded
+    as a string, so it travels to AG-UI unchanged. The observer is a side
+    channel: a subscriber that cannot keep up is logged, never allowed to
+    fail a turn that produced a good answer.
+    """
+    calls = {
+        getattr(block, "id", None): block
+        for message in context
+        for block in message.get_content_blocks("tool_call")
+    }
+    records = [
+        {
+            "id": getattr(block, "id", None),
+            "name": getattr(block, "name", None),
+            "arguments": getattr(calls.get(getattr(block, "id", None)), "input", None),
+            "output": _output_text(getattr(block, "output", None)),
+        }
+        for block in results
+    ]
+    try:
+        await observer(records)
+    except Exception:  # noqa: BLE001 — the transport must not fail the turn
+        logger.warning("tool-result observer failed", exc_info=True)
+
+
 async def run_turn(
     store: SessionStore,
     buyer_id: str,
@@ -303,6 +361,8 @@ async def run_turn(
     raw_query: str,
     timeout_seconds: float = 120.0,
     order_service: OrderService | None = None,
+    on_tool_results: ToolResultsObserver | None = None,
+    on_text_delta: TextDeltaObserver | None = None,
 ) -> CommerceIntentResponse:
     """Run one turn and record its trace, metrics and user-visible events (S13).
 
@@ -327,6 +387,8 @@ async def run_turn(
                 raw_query,
                 timeout_seconds=timeout_seconds,
                 order_service=order_service,
+                on_tool_results=on_tool_results,
+                on_text_delta=on_text_delta,
             )
         except (Exception, asyncio.CancelledError) as exc:
             turn_span.fail(type(exc).__name__)
@@ -361,6 +423,78 @@ async def run_turn(
         return response
 
 
+async def _reply_with_deltas(
+    agent: Any,
+    user_msg: Msg,
+    *,
+    timeout_seconds: float,
+    on_text_delta: TextDeltaObserver | None,
+) -> Msg:
+    """Await one agent reply, optionally forwarding its text as it arrives.
+
+    AgentScope's ``reply_stream`` interleaves block events with the final
+    ``Msg``. We consume it only when someone is listening: a caller with no
+    observer (the plain HTTP intent endpoint) keeps the atomic ``reply``,
+    which has no partially-rendered failure mode.
+
+    The timeout wraps *consumption*, not just the call — a streaming reply is
+    only complete when its last chunk arrives.
+    """
+    reply_stream = getattr(agent, "reply_stream", None)
+    if on_text_delta is None or not callable(reply_stream):
+        return await asyncio.wait_for(
+            agent.reply(user_msg, structured_schema=ProductCardList),
+            timeout=timeout_seconds,
+        )
+
+    final: Msg | None = None
+    pending: list[str] = []
+    answer_call = False
+
+    async def flush() -> None:
+        nonlocal pending
+        for delta in pending:
+            await on_text_delta(delta)
+        pending = []
+
+    async with asyncio.timeout(timeout_seconds):
+        async for item in reply_stream(
+            user_msg, structured_schema=ProductCardList, yield_final_msg=True
+        ):
+            if isinstance(item, ModelCallStartEvent):
+                pending = []
+                answer_call = False
+            elif isinstance(item, TextBlockDeltaEvent):
+                if item.delta:
+                    pending.append(item.delta)
+            elif isinstance(item, ToolCallStartEvent):
+                if item.tool_call_name == STRUCTURED_OUTPUT_TOOL:
+                    answer_call = True
+            elif isinstance(item, ModelCallEndEvent):
+                # The model call that asks for the structured answer wrote
+                # prose around it, but that prose is unguarded — and the
+                # guarded summary replaces it at the end of the turn. The
+                # narration of every other call is safe to show, so it goes
+                # out as soon as the call closes (the tool it asked for is
+                # about to run, which is the waiting the buyer needs to see).
+                if not answer_call:
+                    await flush()
+                pending = []
+            elif not isinstance(item, EventBase):
+                # With ``yield_final_msg`` the stream's last item is the
+                # reply itself; every other item is a progress event.
+                final = item
+    if pending and not answer_call:
+        # Agents that emit no model-call boundaries still get their narration.
+        await flush()
+    if final is None:
+        # Without the final message there are no cards and no grounding
+        # evidence, so a truncated stream fails like any other broken reply.
+        logger.error("streaming reply ended without a final Msg")
+        raise ModelFailureError()
+    return final
+
+
 async def _run_turn(
     store: SessionStore,
     buyer_id: str,
@@ -368,6 +502,8 @@ async def _run_turn(
     raw_query: str,
     timeout_seconds: float = 120.0,
     order_service: OrderService | None = None,
+    on_tool_results: ToolResultsObserver | None = None,
+    on_text_delta: TextDeltaObserver | None = None,
 ) -> CommerceIntentResponse:
     """Run one conversational turn and return the model's product cards.
 
@@ -420,12 +556,11 @@ async def _run_turn(
                 }
                 with span("agent.reply") as reply_span:
                     try:
-                        reply = await asyncio.wait_for(
-                            session.agent.reply(
-                                UserMsg(name="user", content=raw_query),
-                                structured_schema=ProductCardList,
-                            ),
-                            timeout=timeout_seconds,
+                        reply = await _reply_with_deltas(
+                            session.agent,
+                            UserMsg(name="user", content=raw_query),
+                            timeout_seconds=timeout_seconds,
+                            on_text_delta=on_text_delta,
                         )
                     except TimeoutError as exc:
                         raise ModelTimeoutError(timeout_seconds) from exc
@@ -447,6 +582,13 @@ async def _run_turn(
                 # during this turn and fail loudly (S5-2) rather than trust whatever the
                 # model guessed after the failed search.
                 this_turn = tool_results_since(session.agent.state.context, known_results)
+                # Emit before the ERROR check: a failed search is still a tool
+                # call the buyer's stream should show, immediately before the
+                # run fails.
+                if on_tool_results is not None and this_turn:
+                    await _notify_tool_results(
+                        on_tool_results, session.agent.state.context, this_turn
+                    )
                 if any(block.state == ToolResultState.ERROR for block in this_turn):
                     raise ToolFailureError()
                 structured = reply.structured_output

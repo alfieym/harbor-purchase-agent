@@ -154,6 +154,15 @@ class Settings(BaseSettings):
     observability_metric_window: int = Field(default=512, ge=1)
     observability_event_heartbeat_seconds: float = Field(default=15.0, gt=0)
 
+    # S14: AG-UI runs. A run outlives the request that started it, so its
+    # events live in their own SQLite file; the kill switch stops the lifespan
+    # from assembling a manager, and the routes then answer 503.
+    agui_enabled: bool = True
+    runs_db_path: Path = Path(__file__).resolve().parents[4] / "data" / "sessions" / "runs.sqlite3"
+    # A subscriber that falls this far behind loses old frames, not the run.
+    run_event_buffer: int = Field(default=500, ge=1)
+    run_heartbeat_seconds: float = Field(default=15.0, gt=0)
+
     # S9: multi-agent dispatch. The batch budget must fit inside the parent
     # turn, or a slow batch would turn the whole request into a 504 (S9-4).
     dispatch_enabled: bool = True

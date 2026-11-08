@@ -83,7 +83,9 @@ def test_missing_usage_is_unknown_and_not_estimated(obs) -> None:
 
 class _UsageModel(ChatModelBase):
     def __init__(self, usage: ChatUsage | None) -> None:
-        super().__init__(credential=None, model="m", parameters=None, max_retries=0)
+        super().__init__(
+            credential=None, model="m", parameters=None, stream=False, max_retries=0
+        )
         self._usage = usage
 
     async def __call__(self, messages, tools=None, tool_choice=None, **kwargs):

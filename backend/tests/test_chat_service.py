@@ -10,9 +10,18 @@ import json
 import logging
 
 import pytest
+from agentscope.event import (
+    ModelCallEndEvent,
+    ModelCallStartEvent,
+    TextBlockDeltaEvent,
+    TextBlockEndEvent,
+    TextBlockStartEvent,
+    ToolCallStartEvent,
+)
 from agentscope.message import (
     Msg,
     TextBlock,
+    ToolCallBlock,
     ToolResultBlock,
     ToolResultState,
     UserMsg,
@@ -176,6 +185,222 @@ class GroundedAgent:
 
 
 _HIT = {"product_id": "X1", "title": "猫饮水器", "selected_sku_id": "X1-S1"}
+
+
+class ToolCallingAgent(GroundedAgent):
+    """``GroundedAgent`` that records its call block next to the result.
+
+    The observer joins the two by id, so a test that only wrote the result
+    block would not prove the ``arguments`` path works.
+    """
+
+    async def reply(self, msg, structured_schema=None) -> Msg:
+        self.state.context.append(msg)
+        self.state.context.append(
+            Msg(
+                name="purchase_agent",
+                role="assistant",
+                content=[
+                    ToolCallBlock(
+                        id="call-this-turn",
+                        name="product_search",
+                        input='{"query": "猫饮水器"}',
+                    ),
+                    ToolResultBlock(
+                        id="call-this-turn",
+                        name="product_search",
+                        output=[
+                            TextBlock(
+                                type="text",
+                                text=json.dumps({"hits": [_HIT]}, ensure_ascii=False),
+                            )
+                        ],
+                        state=ToolResultState.SUCCESS,
+                    ),
+                ],
+            )
+        )
+        result = Msg(
+            name="purchase_agent",
+            role="assistant",
+            content=[TextBlock(type="text", text="命中 1 条")],
+            structured_output=self._output,
+        )
+        self.state.context.append(result)
+        return result
+
+
+def test_run_turn_hands_tool_traffic_to_an_observer() -> None:
+    """S14: the transport needs the call id, name, args and result verbatim."""
+    agent = ToolCallingAgent(_cards_dict())
+    seen: list[dict] = []
+
+    async def observer(records: list[dict]) -> None:
+        seen.extend(records)
+
+    async def body():
+        return await run_turn(
+            SessionStore(agent_factory=lambda state=None: agent),
+            "u1",
+            "s1",
+            "给猫买饮水器",
+            on_tool_results=observer,
+        )
+
+    asyncio.run(body())
+
+    assert seen == [
+        {
+            "id": "call-this-turn",
+            "name": "product_search",
+            "arguments": '{"query": "猫饮水器"}',
+            "output": json.dumps({"hits": [_HIT]}, ensure_ascii=False),
+        }
+    ]
+
+
+def test_a_failing_observer_does_not_fail_the_turn() -> None:
+    """A transport is a side channel: losing it must not lose the answer."""
+    agent = ToolCallingAgent(_cards_dict())
+
+    async def observer(records: list[dict]) -> None:
+        raise RuntimeError("the subscriber went away")
+
+    async def body():
+        return await run_turn(
+            SessionStore(agent_factory=lambda state=None: agent),
+            "u1",
+            "s1",
+            "给猫买饮水器",
+            on_tool_results=observer,
+        )
+
+    response = asyncio.run(body())
+
+    assert response.final_text == "命中 1 条"
+    assert [card.sku_id for card in response.cards] == ["X1-S1"]
+
+
+class StreamingAgent(FakeAgent):
+    """Answers like ``FakeAgent`` but narrates first, as a real agent does.
+
+    AgentScope's ``reply_stream`` yields the model's text as it arrives and
+    the final ``Msg`` last, which is the whole point of S14-1.
+    """
+
+    def __init__(self, output: dict | None = None, text: str = "", chunks=("你", "好")):
+        super().__init__(output=output, text=text)
+        self.chunks = list(chunks)
+
+    async def reply_stream(self, msg, structured_schema=None, yield_final_msg=False):
+        for chunk in self.chunks:
+            yield TextBlockDeltaEvent(reply_id="r1", block_id="b1", delta=chunk)
+        yield await self.reply(msg, structured_schema)
+
+
+def test_run_turn_forwards_the_agents_text_deltas_as_they_arrive() -> None:
+    """S14-1: the words reach the caller before the turn finishes."""
+    agent = StreamingAgent(output=_cards_dict(), text="命中 1 条")
+    deltas: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    async def body():
+        return await run_turn(
+            SessionStore(agent_factory=lambda state=None: agent),
+            "u1",
+            "s1",
+            "给猫买饮水器",
+            on_text_delta=on_delta,
+        )
+
+    response = asyncio.run(body())
+
+    assert deltas == ["你", "好"]
+    # The streamed narration is not the answer: cards and text still come
+    # from the structured reply, exactly as before.
+    assert response.final_text == "命中 1 条"
+
+
+class TwoCallAgent(FakeAgent):
+    """Narrates, searches, then asks for the structured answer.
+
+    Mirrors AgentScope's real event order: each model call opens, streams its
+    text block, emits the tool call it decided on, and closes. The second
+    call carries the structured-output request *and* the prose the model wrote
+    around it — that prose is the unguarded answer.
+    """
+
+    async def reply_stream(self, msg, structured_schema=None, yield_final_msg=False):
+        yield ModelCallStartEvent(reply_id="r1", model_name="m")
+        yield TextBlockStartEvent(reply_id="r1", block_id="b1")
+        yield TextBlockDeltaEvent(reply_id="r1", block_id="b1", delta="我先搜")
+        yield TextBlockDeltaEvent(reply_id="r1", block_id="b1", delta="一下")
+        yield TextBlockEndEvent(reply_id="r1", block_id="b1")
+        yield ToolCallStartEvent(reply_id="r1", tool_call_id="c1", tool_call_name="product_search")
+        yield ModelCallEndEvent(reply_id="r1", input_tokens=1, output_tokens=1)
+        # The answer call: same shape, but it asks for the structured output.
+        yield ModelCallStartEvent(reply_id="r1", model_name="m")
+        yield TextBlockStartEvent(reply_id="r1", block_id="b2")
+        yield TextBlockDeltaEvent(reply_id="r1", block_id="b2", delta="未经护栏的答案")
+        yield TextBlockEndEvent(reply_id="r1", block_id="b2")
+        yield ToolCallStartEvent(
+            reply_id="r1", tool_call_id="c2", tool_call_name="GenerateStructuredOutput"
+        )
+        yield ModelCallEndEvent(reply_id="r1", input_tokens=1, output_tokens=1)
+        yield await self.reply(msg, structured_schema)
+
+
+def test_run_turn_withholds_the_text_of_the_structured_answer_call() -> None:
+    """S11 owns the answer text: only the guarded summary may reach the buyer.
+
+    The model writes prose around its structured-output request. Forwarding
+    it would show unguarded price/completion claims *and* duplicate the
+    summary that ``run_turn`` returns after the output guard runs.
+    """
+    agent = TwoCallAgent(output=_cards_dict(), text="命中 1 条")
+    deltas: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    async def body():
+        return await run_turn(
+            SessionStore(agent_factory=lambda state=None: agent),
+            "u1",
+            "s1",
+            "给猫买饮水器",
+            on_text_delta=on_delta,
+        )
+
+    response = asyncio.run(body())
+
+    assert deltas == ["我先搜", "一下"]
+    assert response.final_text == "命中 1 条"
+
+
+def test_run_turn_still_works_for_an_agent_that_cannot_stream() -> None:
+    """Older agents (and every stub) keep the single-reply path."""
+    agent = FakeAgent(output=_cards_dict(), text="命中 1 条")
+    deltas: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    async def body():
+        return await run_turn(
+            SessionStore(agent_factory=lambda state=None: agent),
+            "u1",
+            "s1",
+            "给猫买饮水器",
+            on_text_delta=on_delta,
+        )
+
+    response = asyncio.run(body())
+
+    assert deltas == []
+    assert response.final_text == "命中 1 条"
 
 
 def test_run_turn_drops_cards_without_this_turn_evidence() -> None:

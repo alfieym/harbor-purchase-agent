@@ -11,18 +11,61 @@ from harbor.core.errors import install_error_handlers
 from harbor.core.logging import setup_logging
 from harbor.features.chat.repository import SessionRepository
 from harbor.features.chat.router import router as commerce_router
-from harbor.features.chat.service import SessionStore
+from harbor.features.chat.service import SessionStore, run_turn
 from harbor.features.guardrails.router import router as guardrails_router
 from harbor.features.health.router import router as health_router
 from harbor.features.orders.evidence import SqliteEvidenceStore
 from harbor.features.orders.router import router as orders_router
 from harbor.features.orders.service import OrderService
 from harbor.features.orders.store import SqliteOrderStore
+from harbor.features.runs.router import router as agui_router
+from harbor.features.runs.service import RunManager
+from harbor.features.runs.store import SqliteRunStore
 from harbor.observability import Observability, configure_observability
 from harbor.observability.middleware import observability_middleware
 from harbor.observability.router import router as observability_router
 
 logger = logging.getLogger(__name__)
+
+
+def build_run_manager(
+    settings: Settings,
+    chat_store: SessionStore | None,
+    order_service: OrderService | None,
+) -> RunManager | None:
+    """Assemble the S14 run manager, or ``None`` when there is nothing to run.
+
+    A run is the same turn as ``POST /commerce/intents``, given a lifecycle:
+    the manager supplies the transport observer so tool traffic lands in the
+    event log, and ``shop`` state is rebuilt from the structured response.
+    """
+    if chat_store is None or not settings.agui_enabled:
+        return None
+
+    async def turn_runner(
+        buyer_id: str,
+        session_id: str,
+        text: str,
+        on_tool_results,
+        on_text_delta,
+    ):
+        return await run_turn(
+            chat_store,
+            buyer_id,
+            session_id,
+            text,
+            timeout_seconds=settings.turn_timeout_seconds,
+            order_service=order_service,
+            on_tool_results=on_tool_results,
+            on_text_delta=on_text_delta,
+        )
+
+    return RunManager(
+        SqliteRunStore(settings.runs_db_path),
+        turn_runner,
+        subscriber_buffer=settings.run_event_buffer,
+        heartbeat_seconds=settings.run_heartbeat_seconds,
+    )
 
 
 @asynccontextmanager
@@ -75,7 +118,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         app.state.chat_store = None
         app.state.runtime = None
+    # S14: runs are a transport over the same turn; without a chat store the
+    # routes stay mounted and report 503 rather than pretending to work.
+    run_manager = build_run_manager(settings, app.state.chat_store, app.state.order_service)
+    app.state.run_manager = run_manager
+    if run_manager is not None:
+        # A previous process may have died mid-run; close those books before
+        # this one starts accepting subscribers.
+        await run_manager.startup()
     yield
+    if run_manager is not None:
+        await run_manager.shutdown()
     # Restore whatever instance was active before this app assembled, so nested
     # TestClients or embedded apps do not keep a shutdown instance installed.
     configure_observability(previous_observability)
@@ -101,6 +154,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # the observability routes report disabled rather than borrowing another
     # app's process-global instance.
     app.state.observability = None
+    # Until the lifespan assembles one, the AG-UI routes report 503 rather
+    # than failing on a missing attribute.
+    app.state.run_manager = None
 
     app.add_middleware(
         CORSMiddleware,
@@ -128,5 +184,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # S13: trace, metrics and the event stream. Independent of the runtime, so
     # a deployment without a model still reports its own health.
     app.include_router(observability_router, prefix=cfg.api_prefix)
+    # S14: AG-UI transport. The checklist's paths are root-level, so the
+    # frontend talks to ``/agui/...`` beside ``/commerce/...``.
+    app.include_router(agui_router)
 
     return app

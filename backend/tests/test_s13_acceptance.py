@@ -80,7 +80,9 @@ class _NeverAgent:
 
 class _FakeModel(ChatModelBase):
     def __init__(self, model: str, script: list[str]) -> None:
-        super().__init__(credential=None, model=model, parameters=None, max_retries=0)
+        super().__init__(
+            credential=None, model=model, parameters=None, stream=False, max_retries=0
+        )
         self.script = list(script)
         self.calls = 0
 
@@ -316,7 +318,9 @@ class _ToolCallingModel(ChatModelBase):
     """First call asks for product_search, the second answers."""
 
     def __init__(self) -> None:
-        super().__init__(credential=None, model="fake-main", parameters=None, max_retries=0)
+        super().__init__(
+            credential=None, model="fake-main", parameters=None, stream=False, max_retries=0
+        )
         self.formatter = _Formatter()
         self.calls = 0
 

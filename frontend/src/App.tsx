@@ -1,4 +1,5 @@
 import { Card } from './components/ui/Card'
+import { ChatPanel } from './features/chat/ChatPanel'
 import { HealthCard } from './features/health/HealthCard'
 
 const steps = [
@@ -38,10 +39,12 @@ function App() {
           </ol>
         </Card>
 
+        <ChatPanel />
+
         <HealthCard />
 
         <footer className="text-sm text-slate-500">
-          Agent 对话将在第二阶段接入；本页仅验证前后端连通与配置。
+          一次提问一个 run：事件先落库再广播，刷新从持久事件重建。
         </footer>
       </div>
     </main>

@@ -1,0 +1,407 @@
+<title>S14 AG-UI 传输</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C; --accent-soft: #E3F1EE;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --warn: #9A6700; --warn-soft: #FBF1DC;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --warn: #E0A63C; --warn-soft: #33270F;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --warn: #E0A63C; --warn-soft: #33270F;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(56px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  header { margin-bottom: 16px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 8px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 68ch; }
+  .sub b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.accent { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+
+  .flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; padding: 14px 18px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  @media (max-width: 860px) { .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 540px) { .flow { grid-template-columns: 1fr; gap: 10px; } }
+  .fcell { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 9px; align-content: start; padding: 2px 0 2px 10px; border-left: 2px solid var(--accent); }
+  .fidx { grid-row: 1 / span 2; font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--accent-ink); line-height: 1.35; }
+  .fname { font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .fcount { grid-column: 2; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+  .fout { grid-column: 1 / -1; margin-top: 5px; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--muted); }
+  .fout::before { content: "→ "; color: var(--accent); }
+  .hint { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+
+  .mhead { margin: 34px 0 4px; font-size: 19px; font-weight: 700; text-wrap: balance; }
+  .msub { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 74ch; }
+  .msub b { color: var(--fg); }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  figure { margin: 0; }
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; height: auto; min-width: 720px; }
+  figcaption { font-size: 12.5px; color: var(--muted); margin-top: 8px; padding-left: 2px; max-width: 78ch; }
+  figcaption b { color: var(--fg); }
+  .lane-label { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--muted); letter-spacing: .04em; }
+  .lane-sub { font-size: 10px; fill: var(--faint); }
+  .box-title { font-size: 12.5px; font-weight: 600; fill: var(--fg); }
+  .box-title.bad { fill: var(--bad); }
+  .box-title.good { fill: var(--good); }
+  .box-title.warn { fill: var(--warn); }
+  .box-sub { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--muted); }
+  .box-sub-accent { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--accent-ink); }
+  .edge-label { font-size: 10px; fill: var(--muted); }
+
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .trow { display: grid; grid-template-columns: .8fr 2fr .7fr 1.3fr; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .trow:last-child { border-bottom: 0; }
+  .trow.head { background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .cell { font-family: "IBM Plex Mono", monospace; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+  .cell.plain { font-family: "IBM Plex Sans", sans-serif; font-size: 12.5px; color: var(--muted); }
+  .cell.plain b { color: var(--fg); }
+  .tstat { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; text-align: center; white-space: nowrap; }
+  .tstat.yes { color: var(--good); background: var(--good-soft); }
+  .tstat.no { color: var(--bad); background: var(--bad-soft); }
+  .tstat.mid { color: var(--warn); background: var(--warn-soft); }
+
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .panel h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
+  .panel p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .panel p b { color: var(--fg); }
+
+  .note { margin-top: 16px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+  .note + .note { margin-top: 10px; }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { padding: 12px 14px; }
+    .trow { grid-template-columns: 1fr; gap: 4px; }
+    .trow.head { display: none; }
+    .tstat { justify-self: start; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Purchase Agent · S14</p>
+    <h1>run 比请求活得久</h1>
+    <p class="sub">一次 turn 不再寄生在 HTTP 响应里。它先落库、拿到自己的序号，再开始跑；<b>断开连接只是少一个订阅者，不是取消</b>；刷新时从持久日志重放，而不是重跑一遍。</p>
+    <div class="chips">
+      <span class="chip accent">202 · RUN_STARTED 已落库</span>
+      <span class="chip">SQLite WAL · 每个 run 一个序号</span>
+      <span class="chip">断开 ≠ 取消</span>
+      <span class="chip good">40 tests · 85 全绿</span>
+    </div>
+
+    <div class="flow" aria-label="S14 流程">
+      <div class="fcell"><span class="fidx">①</span><span class="fname">POST /runs</span><span class="fcount">建行 · running</span><span class="fout">先落 RUN_STARTED</span></div>
+      <div class="fcell"><span class="fidx">②</span><span class="fname">create_task</span><span class="fcount">run 与请求解耦</span><span class="fout">立刻返回 202</span></div>
+      <div class="fcell"><span class="fidx">③</span><span class="fname">_append</span><span class="fcount">先落库，再广播</span><span class="fout">seq 与终态同事务</span></div>
+      <div class="fcell"><span class="fidx">④</span><span class="fname">events()</span><span class="fcount">重放 + 跟随</span><span class="fout">锁内无缝隙切换</span></div>
+      <div class="fcell"><span class="fidx">⑤</span><span class="fname">reducer</span><span class="fcount">seq ≤ lastSeq 丢弃</span><span class="fout">刷新可重放</span></div>
+      <div class="fcell"><span class="fidx">⑥</span><span class="fname">终态</span><span class="fcount">四个结局互斥</span><span class="fout">FINISHED / ERROR</span></div>
+    </div>
+    <p class="hint">一张图记住一条 run 的一生：请求先走，任务后跑，观众随时来去。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2 class="mhead">一条 run 的一生</h2>
+  <p class="msub">四条泳道不是按文件分的，是按<b>谁还活着</b>分的：请求会先死，任务活得久，订阅者随时可以走。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 700" role="img" aria-label="S14 run 生命周期图。启动道：POST /agui/runs 建行并置 running，写 RUN_STARTED 得到序号 1 之后才 create_task 并返回 202。执行道：先 STEP_STARTED 与 TEXT_MESSAGE_START，模型叙述的每个增量经 on_text_delta 变成一条 TEXT_MESSAGE_CONTENT，经 _append 先落库再广播；收尾依次是最终文本、TEXT_MESSAGE_END、STATE_SNAPSHOT、RUN_FINISHED，终态与 status 在同一事务提交。跟随道：GET events 先判 404，在锁内重放持久日志并加入订阅队列，取不到事件时发心跳，断开只移除队列。终态道：finished、failed、cancelled、interrupted 四个互斥结局。">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+          <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="arr-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--good)"/></marker>
+          <marker id="arr-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--bad)"/></marker>
+        </defs>
+
+        <!-- ① 启动 -->
+        <rect x="0" y="20" width="1000" height="128" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="44">① 启动</text>
+        <text class="lane-sub" x="14" y="58">请求活着</text>
+
+        <rect x="90" y="56" width="190" height="58" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="76">POST /agui/runs</text>
+        <text class="box-sub" x="104" y="94">buyerId · messages</text>
+
+        <rect x="306" y="56" width="190" height="58" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="320" y="76">落库 RUN_STARTED</text>
+        <text class="box-sub" x="320" y="94">seq = 1，先存再返回</text>
+
+        <rect x="522" y="56" width="190" height="58" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="536" y="76">create_task</text>
+        <text class="box-sub" x="536" y="94">run 与请求解耦</text>
+
+        <rect x="738" y="56" width="190" height="58" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="752" y="76">202 Accepted</text>
+        <text class="box-sub" x="752" y="94">{ runId, threadId }</text>
+
+        <line x1="280" y1="85" x2="304" y2="85" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="496" y1="85" x2="520" y2="85" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="712" y1="85" x2="736" y2="85" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="90" y="138">同 runId 再 POST → created = false，不会多出一条 RUN_STARTED</text>
+
+        <!-- ② 执行 -->
+        <rect x="0" y="166" width="1000" height="240" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="190">② 执行</text>
+        <text class="lane-sub" x="14" y="204">task 活着</text>
+
+        <rect x="90" y="200" width="180" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="220">STEP_STARTED</text>
+        <text class="box-sub" x="104" y="238">stepName = agent</text>
+        <rect x="296" y="200" width="200" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="310" y="220">TEXT_MESSAGE_START</text>
+        <text class="box-sub" x="310" y="238">id = msg_&lt;runId&gt;</text>
+        <rect x="522" y="200" width="180" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="536" y="220">turn runner</text>
+        <text class="box-sub" x="536" y="238">和 /commerce 同一段</text>
+
+        <rect x="90" y="270" width="180" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="290">on_text_delta</text>
+        <text class="box-sub" x="104" y="308">每个增量一条</text>
+        <rect x="296" y="270" width="190" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="310" y="290">CONTENT</text>
+        <text class="box-sub" x="310" y="308">逐段广播给观众</text>
+        <rect x="512" y="270" width="180" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="526" y="290">_append</text>
+        <text class="box-sub-accent" x="526" y="308">先落库，再广播</text>
+        <rect x="718" y="270" width="180" height="56" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="732" y="290">队列 500</text>
+        <text class="box-sub" x="732" y="308">慢了丢最旧</text>
+
+        <rect x="90" y="340" width="160" height="48" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="360">最终文本</text>
+        <text class="box-sub" x="104" y="376">护栏后的版本</text>
+        <rect x="276" y="340" width="170" height="48" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="290" y="360">MESSAGE_END</text>
+        <text class="box-sub" x="290" y="376">同一条消息收口</text>
+        <rect x="472" y="340" width="190" height="48" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="486" y="360">STATE_SNAPSHOT</text>
+        <text class="box-sub" x="486" y="376">卡片与草稿在这里</text>
+        <rect x="688" y="340" width="200" height="48" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="702" y="360">RUN_FINISHED</text>
+        <text class="box-sub-accent" x="702" y="376">status 同事务提交</text>
+
+        <line x1="270" y1="228" x2="294" y2="228" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="496" y1="228" x2="520" y2="228" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="270" y1="298" x2="294" y2="298" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="486" y1="298" x2="510" y2="298" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="692" y1="298" x2="716" y2="298" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="250" y1="364" x2="274" y2="364" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="446" y1="364" x2="470" y2="364" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="662" y1="364" x2="686" y2="364" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="90" y="400">失败或取消时，收口停在 MESSAGE_END，再补一个终态；不会出现两个结局</text>
+
+        <!-- ③ 跟随 -->
+        <rect x="0" y="422" width="1000" height="170" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="446">③ 跟随</text>
+        <text class="lane-sub" x="14" y="460">订阅者可多个</text>
+
+        <rect x="90" y="448" width="200" height="54" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="468">GET .../events</text>
+        <text class="box-sub" x="104" y="486">after 或 Last-Event-ID</text>
+        <rect x="310" y="448" width="150" height="54" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="324" y="468">get_run</text>
+        <text class="box-sub" x="324" y="486">先判 404</text>
+        <rect x="480" y="448" width="240" height="54" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="494" y="468">锁内：重放 + 入队</text>
+        <text class="box-sub" x="494" y="486">一把锁，没有缝隙</text>
+        <rect x="740" y="448" width="200" height="54" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="754" y="468">再跟随队列</text>
+        <text class="box-sub" x="754" y="486">终态后自然结束</text>
+
+        <rect x="90" y="516" width="200" height="46" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="536">15s 没事件</text>
+        <text class="box-sub" x="104" y="552">→ 发心跳注释</text>
+        <rect x="310" y="516" width="180" height="46" rx="10" fill="var(--bad-soft)" stroke="var(--bad)" stroke-dasharray="5 4"/>
+        <text class="box-title bad" x="324" y="536">断开连接</text>
+        <text class="box-sub" x="324" y="552">只移除一个队列</text>
+        <text class="edge-label" x="512" y="536">turn 继续跑到终态；取消只能由 POST /cancel 触发</text>
+
+        <line x1="290" y1="475" x2="308" y2="475" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="460" y1="475" x2="478" y2="475" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="720" y1="475" x2="738" y2="475" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <!-- ④ 终态 -->
+        <rect x="0" y="608" width="1000" height="76" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="632">④ 终态</text>
+        <text class="lane-sub" x="14" y="646">四选一</text>
+
+        <rect x="90" y="626" width="200" height="44" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="104" y="654">finished</text>
+        <rect x="310" y="626" width="200" height="44" rx="10" fill="var(--bad-soft)" stroke="var(--bad)"/>
+        <text class="box-title bad" x="324" y="654">failed · RUN_ERROR(code)</text>
+        <rect x="530" y="626" width="210" height="44" rx="10" fill="var(--warn-soft)" stroke="var(--warn)"/>
+        <text class="box-title warn" x="544" y="654">cancelled · POST /cancel</text>
+        <rect x="760" y="626" width="230" height="44" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="774" y="654">interrupted · 进程重启</text>
+      </svg>
+    </div>
+    <figcaption><b>四个泳道只有一处同步：SQLite 的那次提交。</b>启动道提交完之后才返回，执行道提交完之后才广播，终态事件把 <span class="mono">runs.status</span> 一起写进同一个事务。订阅者是可丢弃的——它们不持有 run，只持有一个有界队列。</figcaption>
+  </figure>
+
+  <h2 class="mhead">先落库，再广播</h2>
+  <p class="msub">整页只有这一条不变量。它反过来，其他保证全塌：刷新可能看不到刚播过的帧，崩溃可能留下空洞。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 250" role="img" aria-label="S14 排序不变量时序图。turn runner 调 _append；_append 在 run 锁内让 SQLite 用 BEGIN IMMEDIATE 取写锁、算出下一个序号并插入，提交后才返回；_append 拿到序号之后才把事件投递给订阅者。因此订阅者看到序号 N 时，N 必然已经提交。">
+        <defs>
+          <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+          <marker id="arr2-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+        </defs>
+
+        <rect x="60" y="20" width="180" height="34" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="82" y="42">turn runner</text>
+        <rect x="350" y="20" width="160" height="34" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="372" y="42">RunManager</text>
+        <rect x="630" y="20" width="140" height="34" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="662" y="42">SQLite</text>
+        <rect x="815" y="20" width="170" height="34" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="838" y="42">subscriber</text>
+
+        <line x1="150" y1="54" x2="150" y2="205" stroke="var(--border)"/>
+        <line x1="430" y1="54" x2="430" y2="205" stroke="var(--border)"/>
+        <line x1="700" y1="54" x2="700" y2="205" stroke="var(--border)"/>
+        <line x1="900" y1="54" x2="900" y2="205" stroke="var(--border)"/>
+
+        <text class="edge-label" x="156" y="84">① append(event)</text>
+        <line x1="150" y1="92" x2="428" y2="92" stroke="var(--muted)" marker-end="url(#arr2)"/>
+
+        <text class="edge-label" x="436" y="124">② BEGIN IMMEDIATE · MAX(seq)+1 · INSERT · COMMIT</text>
+        <line x1="430" y1="132" x2="698" y2="132" stroke="var(--muted)" marker-end="url(#arr2)"/>
+
+        <text class="edge-label" x="436" y="164">③ 拿到 seq（已提交）才广播</text>
+        <line x1="430" y1="172" x2="898" y2="172" stroke="var(--accent)" marker-end="url(#arr2-accent)"/>
+
+        <rect x="60" y="205" width="880" height="30" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-sub-accent" x="76" y="224">不变量：订阅者看到 N ⇒ 数据库里 N 已提交。不是「先发后存」，也不是「存发并行」。</text>
+      </svg>
+    </div>
+    <figcaption><b>终态事件为什么必须和 status 同一个事务？</b>否则会出现一个窗口：<span class="mono">RUN_FINISHED</span> 已经播出去，客户端马上去 <span class="mono">GET /runs/{id}</span>，却读到 <span class="mono">running</span>。把两件事塞进同一次提交，窗口就没了。</figcaption>
+  </figure>
+
+  <h2 class="mhead">四个结局</h2>
+  <p class="msub">任何一条 run 的持久日志，最后一条一定是 <span class="mono">RUN_FINISHED</span> 或 <span class="mono">RUN_ERROR</span>——包括被进程重启打断的那些。</p>
+
+  <div class="tbl" role="table" aria-label="S14 终态">
+    <div class="trow head" role="row"><span>场景</span><span>日志的最后</span><span>status</span><span>谁写的</span></div>
+    <div class="trow" role="row"><span class="cell">成功</span><span class="cell">STATE_SNAPSHOT → RUN_FINISHED</span><span class="tstat yes">finished</span><span class="cell plain">与终态同事务</span></div>
+    <div class="trow" role="row"><span class="cell">失败</span><span class="cell">MESSAGE_END → RUN_ERROR(code)</span><span class="tstat no">failed</span><span class="cell plain">兜底 except，异常只进日志</span></div>
+    <div class="trow" role="row"><span class="cell">取消</span><span class="cell">快照(cancelled) → RUN_FINISHED</span><span class="tstat mid">cancelled</span><span class="cell plain">CancelledError 分支</span></div>
+    <div class="trow" role="row"><span class="cell">重启</span><span class="cell">RUN_ERROR(server_restarted)</span><span class="tstat no">interrupted</span><span class="cell plain">启动时扫遗留的 running</span></div>
+  </div>
+
+  <div class="note"><b>四个端点：</b><span class="mono">POST /agui/runs</span> 返回 202 · <span class="mono">GET /agui/runs/{id}/events</span> 重放再跟随 · <span class="mono">POST /agui/runs/{id}/cancel</span> 只取消一次 · <span class="mono">GET /agui/runs/{id}</span> 恢复前先问它。</div>
+  <div class="note"><b>失败只有一个 code 表：</b><span class="mono">MODEL_TIMEOUT</span> · <span class="mono">MODEL_FAILED</span> · <span class="mono">TOOL_FAILED</span> · <span class="mono">NO_STRUCTURED_OUTPUT</span> · <span class="mono">CONTEXT_CAPACITY</span>，兜底 <span class="mono">TURN_FAILED</span>。原始异常文本不出网关。</div>
+
+  <h2 class="mhead">前端：一套 reducer，两种来源</h2>
+  <p class="msub">实时流和刷新回放走的是<b>同一个函数</b>，区别只是 <span class="mono">after</span> 从 0 开始还是从 <span class="mono">lastSeq</span> 开始。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 285" role="img" aria-label="S14 前端状态机。idle 在 send 之后进入 running；running 按终态事件分别进入 finished、cancelled 或 failed；流异常断开时，只有状态仍是 running 才改判为 failed，已经结束的 run 不会因为断线被重新标记；resume 从 lastSeq 继续跟随。刷新时把每个 turn 的持久日志依次从 after=0 重放。">
+        <defs>
+          <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+          <marker id="arr3-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--good)"/></marker>
+          <marker id="arr3-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--bad)"/></marker>
+          <marker id="arr3-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+        </defs>
+
+        <rect x="60" y="64" width="150" height="52" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="82" y="86">idle</text>
+        <text class="box-sub" x="82" y="103">没有 run</text>
+
+        <rect x="290" y="64" width="160" height="52" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="312" y="86">running</text>
+        <text class="box-sub" x="312" y="103">lastSeq 前进</text>
+
+        <rect x="620" y="24" width="170" height="52" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="642" y="46">finished</text>
+        <text class="box-sub" x="642" y="63">RUN_FINISHED</text>
+
+        <rect x="620" y="96" width="170" height="52" rx="10" fill="var(--warn-soft)" stroke="var(--warn)"/>
+        <text class="box-title warn" x="642" y="118">cancelled</text>
+        <text class="box-sub" x="642" y="135">RUN_FINISHED</text>
+
+        <rect x="620" y="168" width="170" height="52" rx="10" fill="var(--bad-soft)" stroke="var(--bad)"/>
+        <text class="box-title bad" x="642" y="190">failed</text>
+        <text class="box-sub" x="642" y="207">RUN_ERROR</text>
+
+        <rect x="820" y="96" width="160" height="52" rx="10" fill="var(--surface-2)" stroke="var(--border)" stroke-dasharray="4 3"/>
+        <text class="box-title" x="834" y="118">interrupted</text>
+        <text class="box-sub" x="834" y="135">界面上显示为 failed</text>
+
+        <line x1="210" y1="90" x2="288" y2="90" stroke="var(--muted)" marker-end="url(#arr3)"/>
+        <text class="edge-label" x="216" y="84">send()</text>
+
+        <polyline points="450,80 548,80 548,50 618,50" fill="none" stroke="var(--good)" marker-end="url(#arr3-good)"/>
+        <polyline points="450,96 560,96 560,122 618,122" fill="none" stroke="var(--muted)" marker-end="url(#arr3)"/>
+        <polyline points="450,108 580,108 580,194 618,194" fill="none" stroke="var(--muted)" marker-end="url(#arr3)"/>
+        <text class="edge-label" x="452" y="148">按终态事件分派</text>
+
+        <polyline points="370,116 370,240 700,240 700,224" fill="none" stroke="var(--bad)" stroke-dasharray="5 4" marker-end="url(#arr3-bad)"/>
+        <text class="edge-label" x="384" y="232">断流：只当它还是 running 才改判</text>
+
+        <polyline points="330,64 330,32 380,32 380,64" fill="none" stroke="var(--accent)" marker-end="url(#arr3-accent)"/>
+        <text class="edge-label" x="392" y="38">resume(after = lastSeq)</text>
+
+        <line x1="790" y1="122" x2="818" y2="122" stroke="var(--muted)" marker-end="url(#arr3)"/>
+
+        <rect x="60" y="248" width="920" height="30" rx="8" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-sub" x="76" y="267">刷新 = 读持久化的 turns，逐个 run 从 after=0 重放；seq 按 run 作用域，交叉重放会撞号</text>
+      </svg>
+    </div>
+    <figcaption><b>「断线」和「失败」是两件事。</b>连接断了只说明这条流没了；如果 run 早已结束，把它改成 failed 就是撒谎。<span class="mono">noteStreamFailure</span> 只在 <span class="mono">running</span> 或 <span class="mono">idle</span> 时生效。</figcaption>
+  </figure>
+
+  <h2 class="mhead">两条前端规则</h2>
+  <div class="twocol">
+    <div class="panel">
+      <h3>seq 是幂等键</h3>
+      <p>重连时重放与实时会重叠，丢掉 <span class="mono">seq ≤ lastSeq</span> 就够了，不需要去重表。<b>没有编号的帧直接报错</b>——它无法被幂等地应用。</p>
+    </div>
+    <div class="panel">
+      <h3>卡片只来自快照</h3>
+      <p>文本给人读，结构给程序读。商品卡只取 <span class="mono">STATE_SNAPSHOT</span> 里的 <span class="mono">cards</span>，<b>不从中文里正则抠价格</b>——那会在第一次改措辞时静默失效。</p>
+    </div>
+  </div>
+
+  <div class="note"><b>一个刻意的取舍：</b>叙述文字按「模型调用」为单位冲出去，不是逐字实时。结构化输出那次调用必须扣下文本——那是没经过护栏的答案。所以过程文字成段到达、终版答案最后落定。<span class="mono">docs/superpowers/specs</span> 里「不做 token 级流式」这条已过期，以 S14-1 的实现为准。</div>
+</main>

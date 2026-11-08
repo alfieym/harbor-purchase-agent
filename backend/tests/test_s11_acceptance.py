@@ -54,7 +54,11 @@ FIXTURE = Path(__file__).parent / "fixtures" / "catalog-vacuum-demo.jsonl"
 
 class FakeModel(ChatModelBase):
     def __init__(self, model: str, script) -> None:
-        super().__init__(credential=None, model=model, parameters=None, max_retries=0)
+        # Honest shape: this fake answers with one complete response, so it
+        # tells the wrapper it is not a streaming model (S14-1).
+        super().__init__(
+            credential=None, model=model, parameters=None, stream=False, max_retries=0
+        )
         self.script = list(script)
         self.calls = 0
         self.seen: list[list] = []

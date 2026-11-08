@@ -1,0 +1,309 @@
+<title>S13 可观测</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C; --accent-soft: #E3F1EE;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --soft: #3353A6; --soft-soft: #EAF0FB;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --soft: #8FB0E8; --soft-soft: #182238;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --soft: #8FB0E8; --soft-soft: #182238;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(56px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  header { margin-bottom: 16px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 8px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 68ch; }
+  .sub b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.accent { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+
+  .flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; padding: 14px 18px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  @media (max-width: 860px) { .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 540px) { .flow { grid-template-columns: 1fr; gap: 10px; } }
+  .fcell { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 9px; align-content: start; padding: 2px 0 2px 10px; border-left: 2px solid var(--accent); }
+  .fidx { grid-row: 1 / span 2; font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--accent-ink); line-height: 1.35; }
+  .fname { font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .fcount { grid-column: 2; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+  .fout { grid-column: 1 / -1; margin-top: 5px; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--muted); }
+  .fout::before { content: "→ "; color: var(--accent); }
+  .hint { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+
+  .mhead { margin: 34px 0 4px; font-size: 19px; font-weight: 700; text-wrap: balance; }
+  .msub { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 74ch; }
+  .msub b { color: var(--fg); }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  figure { margin: 0; }
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; height: auto; min-width: 720px; }
+  figcaption { font-size: 12.5px; color: var(--muted); margin-top: 8px; padding-left: 2px; max-width: 78ch; }
+  figcaption b { color: var(--fg); }
+  .lane-label { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--muted); letter-spacing: .04em; }
+  .lane-sub { font-size: 10px; fill: var(--faint); }
+  .box-title { font-size: 12.5px; font-weight: 600; fill: var(--fg); }
+  .box-title.bad { fill: var(--bad); }
+  .box-title.good { fill: var(--good); }
+  .box-title.soft { fill: var(--soft); }
+  .box-sub { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--muted); }
+  .box-sub-accent { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--accent-ink); }
+  .edge-label { font-size: 10px; fill: var(--muted); }
+
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .trow { display: grid; grid-template-columns: 1.2fr 1fr 1.5fr; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .trow:last-child { border-bottom: 0; }
+  .trow.head { background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .cell { font-family: "IBM Plex Mono", monospace; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+  .cell.plain { font-family: "IBM Plex Sans", sans-serif; font-size: 12.5px; color: var(--muted); }
+  .cell.plain b { color: var(--fg); }
+
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .panel h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
+  .panel p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .panel p b { color: var(--fg); }
+
+  .note { margin-top: 16px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { padding: 12px 14px; }
+    .trow { grid-template-columns: 1fr; gap: 4px; }
+    .trow.head { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Purchase Agent · S13</p>
+    <h1>每个慢，都要有名字</h1>
+    <p class="sub">一次 turn 走完，S13 留下三份读数：<b>trace</b> 说时间花在哪，<b>metrics</b> 说是不是越来越差，<b>events</b> 说买家此刻看到了什么。它不改变任何业务行为——没配置时每个埋点都是空操作。</p>
+    <div class="chips">
+      <span class="chip accent">span 结束 → 同时喂 trace 与 metrics</span>
+      <span class="chip">trace 环 256</span>
+      <span class="chip">histogram 窗口 512</span>
+      <span class="chip good">45 tests · 85 全绿</span>
+    </div>
+
+    <div class="flow" aria-label="S13 流程">
+      <div class="fcell"><span class="fidx">①</span><span class="fname">http.request</span><span class="fcount">middleware</span><span class="fout">开一条 trace</span></div>
+      <div class="fcell"><span class="fidx">②</span><span class="fname">turn</span><span class="fcount">trace_scope</span><span class="fout">加入，不新建</span></div>
+      <div class="fcell"><span class="fidx">③</span><span class="fname">agent.reply</span><span class="fcount">模型与工具</span><span class="fout">父子成形</span></div>
+      <div class="fcell"><span class="fidx">④</span><span class="fname">tool · search</span><span class="fcount">to_thread</span><span class="fout">仍是子 span</span></div>
+      <div class="fcell"><span class="fidx">⑤</span><span class="fname">span 结束</span><span class="fcount">喂 trace + metrics</span><span class="fout">两条线各写各的</span></div>
+      <div class="fcell"><span class="fidx">⑥</span><span class="fname">/observability</span><span class="fcount">三个只读出口</span><span class="fout">事件另有 SSE</span></div>
+    </div>
+    <p class="hint">上面是「读」：一次请求长成一棵 span 树。下面是「存与出」：三条线各有各的桶，唯一的交汇点是 span 结束那一刻。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2 class="mhead">一张图看完整条链</h2>
+  <p class="msub">先看形状：一棵缩进的树，加三条平行的管道。树的每个节点结束时，顺手往两条管道里各写一笔。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 750" role="img" aria-label="S13 可观测流程图。上半是 span 树：中间件开 http.request 作为根，turn 的 trace_scope 发现已有 trace 就挂子 span，其下是 session.get_or_create 与 agent.reply，agent.reply 下每个模型请求一个 model.call，工具调用是 tool.product_search，它里面跑在 worker 线程的 search.retrieve 仍算子 span，最后是 turn.output_guard。右侧两个说明框分别解释加入语义和跨线程保持。中部三条线：span 结束写 record_span 得到延迟直方图与错误计数，由 /metrics 读取；trace 结束写 record_trace 进环并由 /traces 读取；publish_event 按 session 编号后由 /events 读取。底部是 SSE 出口。">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+          <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="arr-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--good)"/></marker>
+        </defs>
+
+        <!-- ① span 树 -->
+        <rect x="0" y="20" width="1000" height="380" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="44">① span 树</text>
+        <text class="lane-sub" x="14" y="58">缩进 = 父子</text>
+
+        <rect x="90" y="56" width="250" height="44" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="76">http.request</text>
+        <text class="box-sub" x="104" y="91">middleware · 根 span</text>
+
+        <rect x="130" y="112" width="250" height="44" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="144" y="132">turn</text>
+        <text class="box-sub" x="144" y="147">trace_scope · session_id</text>
+
+        <rect x="170" y="168" width="200" height="44" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="184" y="188">session.get_or_create</text>
+        <text class="box-sub" x="184" y="203">读盘或新建</text>
+
+        <rect x="392" y="168" width="180" height="44" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="406" y="188">agent.reply</text>
+        <text class="box-sub" x="406" y="203">模型 + 工具</text>
+
+        <rect x="210" y="224" width="230" height="44" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="224" y="244">model.call</text>
+        <text class="box-sub" x="224" y="259">每个 provider 请求</text>
+
+        <rect x="210" y="280" width="200" height="44" rx="10" fill="var(--soft-soft)" stroke="var(--soft)"/>
+        <text class="box-title" x="224" y="300">tool.product_search</text>
+        <text class="box-sub" x="224" y="315">检索工具</text>
+
+        <rect x="440" y="280" width="180" height="44" rx="10" fill="var(--soft-soft)" stroke="var(--soft)" stroke-dasharray="5 4"/>
+        <text class="box-title" x="454" y="300">search.retrieve</text>
+        <text class="box-sub" x="454" y="315">worker 线程 · 同一父级</text>
+
+        <rect x="170" y="336" width="210" height="44" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="184" y="356">turn.output_guard</text>
+        <text class="box-sub" x="184" y="371">含订单事实</text>
+
+        <line x1="200" y1="100" x2="200" y2="110" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="240" y1="156" x2="240" y2="166" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="430" y1="156" x2="430" y2="166" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="300" y1="212" x2="300" y2="222" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="300" y1="268" x2="300" y2="278" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="410" y1="302" x2="438" y2="302" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <polyline points="260,324 260,334" fill="none" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <rect x="660" y="56" width="310" height="86" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="674" y="76">加入，不是新建</text>
+        <text class="box-sub" x="674" y="94">ContextVar 里已有 trace</text>
+        <text class="box-sub-accent" x="674" y="110">→ 挂子 span，不另开一条</text>
+        <text class="box-sub" x="674" y="128">所以一个请求就是一整棵树</text>
+
+        <rect x="660" y="160" width="310" height="86" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="674" y="180">跨线程也不断</text>
+        <text class="box-sub" x="674" y="198">asyncio.to_thread 复制 contextvars</text>
+        <text class="box-sub-accent" x="674" y="214">→ 检索仍是 tool 的子 span</text>
+        <text class="box-sub" x="674" y="232">检索慢还是线程慢，分得开</text>
+
+        <rect x="660" y="264" width="310" height="86" rx="10" fill="var(--bad-soft)" stroke="var(--bad)" stroke-dasharray="5 4"/>
+        <text class="box-title bad" x="674" y="284">失败也有名字</text>
+        <text class="box-sub" x="674" y="302">with 里抛异常 → status = error</text>
+        <text class="box-sub" x="674" y="318">只要有一个子 span 红</text>
+        <text class="box-sub" x="674" y="336">整条 trace 就是 error</text>
+
+        <!-- ② 三条线 -->
+        <rect x="0" y="416" width="1000" height="212" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="440">② 三条线</text>
+        <text class="lane-sub" x="14" y="454">各有各的桶</text>
+
+        <rect x="90" y="432" width="160" height="50" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="452">span 结束</text>
+        <text class="box-sub" x="104" y="468">record_span</text>
+        <rect x="286" y="432" width="220" height="50" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="300" y="452">直方图 + 计数</text>
+        <text class="box-sub" x="300" y="468">span.&lt;name&gt;.latency_ms · errors</text>
+        <rect x="542" y="432" width="160" height="50" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="556" y="452">/metrics</text>
+        <text class="box-sub" x="556" y="468">窗口 512 · p95</text>
+
+        <rect x="90" y="494" width="160" height="50" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="514">trace 结束</text>
+        <text class="box-sub" x="104" y="530">record_trace</text>
+        <rect x="286" y="494" width="220" height="50" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="300" y="514">环 256 · 丢最旧</text>
+        <text class="box-sub" x="300" y="530">trace.count · latency · errors</text>
+        <rect x="542" y="494" width="160" height="50" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="556" y="514">/traces</text>
+        <text class="box-sub" x="556" y="530">整棵树</text>
+
+        <rect x="90" y="556" width="160" height="50" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="576">publish_event</text>
+        <text class="box-sub" x="104" y="592">买家看到什么</text>
+        <rect x="286" y="556" width="220" height="50" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="300" y="576">EventBus · seq++</text>
+        <text class="box-sub" x="300" y="592">session 环 200</text>
+        <rect x="542" y="556" width="160" height="50" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="556" y="576">/events</text>
+        <text class="box-sub" x="556" y="592">/events/stream</text>
+
+        <line x1="250" y1="457" x2="284" y2="457" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="506" y1="457" x2="540" y2="457" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="250" y1="519" x2="284" y2="519" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="506" y1="519" x2="540" y2="519" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="250" y1="581" x2="284" y2="581" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="506" y1="581" x2="540" y2="581" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <text class="edge-label" x="742" y="452">前两条由 span 驱动，第三条由业务自己发</text>
+        <text class="edge-label" x="742" y="470">三者互不依赖，一条坏了不影响另两条</text>
+        <text class="edge-label" x="742" y="514">事件是「买家可见的东西」</text>
+        <text class="edge-label" x="742" y="532">不是服务器耗时，所以不挂在 span 上</text>
+
+        <!-- ③ SSE -->
+        <rect x="0" y="644" width="1000" height="90" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="668">③ SSE</text>
+        <text class="lane-sub" x="14" y="682">续传与心跳</text>
+
+        <rect x="90" y="668" width="180" height="48" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="688">Last-Event-ID</text>
+        <text class="box-sub" x="104" y="704">或 after 查询参数</text>
+        <rect x="300" y="668" width="180" height="48" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="314" y="688">先重放，再跟随</text>
+        <text class="box-sub" x="314" y="704">timeout → keepalive</text>
+        <rect x="510" y="668" width="200" height="48" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="524" y="688">id · event · data</text>
+        <text class="box-sub" x="524" y="704">seq 放在 id 里</text>
+        <rect x="740" y="668" width="220" height="48" rx="10" fill="var(--bad-soft)" stroke="var(--bad)" stroke-dasharray="5 4"/>
+        <text class="box-title bad" x="754" y="688">中间件跳过这条流</text>
+        <text class="box-sub" x="754" y="704">否则会开出一个永不结束的 span</text>
+
+        <line x1="270" y1="692" x2="298" y2="692" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="480" y1="692" x2="508" y2="692" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="710" y1="692" x2="738" y2="692" stroke="var(--muted)" marker-end="url(#arr)"/>
+      </svg>
+    </div>
+    <figcaption><b>整张图的骨架只有一句话：span 结束的那一刻，同时喂 trace 和 metrics。</b>所以 <span class="mono">/traces</span> 里那一条的耗时，和 <span class="mono">/metrics</span> 里那一次观测，是同一个数。事件线是故意独立的——它记买家看到的东西，跟服务器耗时无关。</figcaption>
+  </figure>
+
+  <h2 class="mhead">六个值得记住的 span</h2>
+  <p class="msub">不必背下全部。排障时先看这张表，再去 <span class="mono">/traces/{id}</span> 里找它。</p>
+
+  <div class="tbl" role="table" aria-label="S13 span 清单">
+    <div class="trow head" role="row"><span>span</span><span>谁开的</span><span>结束时的指标</span></div>
+    <div class="trow" role="row"><span class="cell">http.request</span><span class="cell plain">中间件</span><span class="cell">http.requests · http.status.&lt;code&gt;</span></div>
+    <div class="trow" role="row"><span class="cell">turn</span><span class="cell plain">run_turn</span><span class="cell">span.turn.latency_ms · trace.count</span></div>
+    <div class="trow" role="row"><span class="cell">agent.reply</span><span class="cell plain">chat service</span><span class="cell">span.agent.reply.latency_ms</span></div>
+    <div class="trow" role="row"><span class="cell">model.call</span><span class="cell plain">GuardedChatModel</span><span class="cell">span.model.call.latency_ms · usage</span></div>
+    <div class="trow" role="row"><span class="cell">tool.product_search</span><span class="cell plain">检索工具</span><span class="cell">tool.search.calls · tool.search.empty</span></div>
+    <div class="trow" role="row"><span class="cell">search.retrieve</span><span class="cell plain">worker 线程</span><span class="cell">span.search.retrieve.latency_ms</span></div>
+  </div>
+
+  <h2 class="mhead">两条别踩的线</h2>
+  <div class="twocol">
+    <div class="panel">
+      <h3>没配就是 no-op</h3>
+      <p>每个 helper 在没配置 <span class="mono">Observability</span> 时返回空 span。埋点代码永远可以写，它<b>不会改变业务行为，也不会抛异常</b>——遥测坏了不能把一次 turn 拖下水。</p>
+    </div>
+    <div class="panel">
+      <h3>unknown 不是 0</h3>
+      <p>用量报不出来就写 <span class="mono">"unknown"</span>，而不是猜一个数。缓存计数<b>只在大于 0 时才计</b>——否则「provider 说没有」和「provider 没报」会被混成一个 0。</p>
+    </div>
+  </div>
+
+  <div class="note"><b>为什么单独提 SSE：</b>它是一条不会自己结束的长连接。中间件按路径前缀把它排除在 <span class="mono">http.request</span> 之外——否则每开一个流，就多一个永远不 close 的 span，把 trace 环塞满。</div>
+</main>
