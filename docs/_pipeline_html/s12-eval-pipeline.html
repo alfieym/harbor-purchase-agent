@@ -1,0 +1,651 @@
+<title>S12 检索评测</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  /* S12 flow — the same paper-and-teal system as the S3/S4/S9/S10/S11 pages. */
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --surface-2: #EFEEE9;
+    --fg: #1B1D21; --muted: #6A6E75; --faint: #9BA0A7; --border: #E3E1DA;
+    --accent: #0E7A6B; --accent-ink: #07584C; --accent-soft: #E3F1EE;
+    --good: #1E8E3E; --good-soft: #E8F4EC; --bad: #C5221F; --bad-soft: #FBEAEA;
+    --warn: #9A6700; --warn-soft: #FBF1DC;
+    --soft: #3353A6; --soft-soft: #EAF0FB;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+      --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+      --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+      --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+      --warn: #E0A63C; --warn-soft: #33270F;
+      --soft: #8FB0E8; --soft-soft: #182238;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151A; --surface: #1B1F26; --surface-2: #232831;
+    --fg: #E7E9EC; --muted: #9BA1A9; --faint: #6F767F; --border: #2C323B;
+    --accent: #2BBBA4; --accent-ink: #8FE3D3; --accent-soft: #14312D;
+    --good: #4CC38A; --good-soft: #16301F; --bad: #F87171; --bad-soft: #3A1C1C;
+    --warn: #E0A63C; --warn-soft: #33270F;
+    --soft: #8FB0E8; --soft-soft: #182238;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(24px, env(safe-area-inset-top, 0px)) max(56px, env(safe-area-inset-bottom, 0px));
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header { margin-bottom: 18px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0 0 8px; }
+  h1 { margin: 0 0 6px; font-size: 28px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 16px; max-width: 80ch; }
+  .sub b { color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); }
+  .chip.accent { border-color: var(--accent); color: var(--accent-ink); }
+  .chip.good { border-color: var(--good); color: var(--good); }
+  .chip.soft { border-color: var(--soft); color: var(--soft); }
+  .chip.bad { border-color: var(--bad); color: var(--bad); }
+
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 14px 16px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .flow-step { display: flex; flex-direction: column; align-items: center; min-width: 96px; padding: 2px 8px; text-align: center; }
+  .fidx { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); }
+  .fname { font-size: 14px; font-weight: 600; }
+  .fcount { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); text-align: center; }
+  .flow-link { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--faint); }
+  .farrow { font-size: 18px; line-height: 1; }
+  .fwhat { font-size: 11px; color: var(--muted); font-family: "IBM Plex Mono", monospace; max-width: 130px; text-align: center; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+
+  .mhead { margin: 34px 0 4px; font-size: 19px; font-weight: 700; text-wrap: balance; }
+  .msub { color: var(--muted); font-size: 13px; margin: 0 0 14px; max-width: 84ch; }
+  .msub b { color: var(--fg); }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  /* --- 泳道流程图 --- */
+  figure { margin: 0; }
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; height: auto; min-width: 760px; }
+  figcaption { font-size: 12.5px; color: var(--muted); margin-top: 8px; padding-left: 2px; max-width: 84ch; }
+  figcaption b { color: var(--fg); }
+  .lane-label { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--muted); letter-spacing: .04em; }
+  .lane-sub { font-size: 10px; fill: var(--faint); }
+  .box-title { font-size: 12.5px; font-weight: 600; fill: var(--fg); }
+  .box-title.bad { fill: var(--bad); }
+  .box-title.good { fill: var(--good); }
+  .box-sub { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--muted); }
+  .box-sub-accent { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--accent-ink); }
+  .edge-label { font-size: 10px; fill: var(--muted); }
+
+  /* --- 表格 --- */
+  .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .trow { display: grid; grid-template-columns: 1.1fr 1fr 118px; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .trow:last-child { border-bottom: 0; }
+  .trow.head { background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .cell { font-family: "IBM Plex Mono", monospace; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+  .cell.plain { font-family: "IBM Plex Sans", sans-serif; font-size: 12.5px; color: var(--muted); }
+  .cell.plain b { color: var(--fg); }
+  .tstat { font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; text-align: center; white-space: nowrap; }
+  .tstat.pass { color: var(--good); background: var(--good-soft); }
+  .tstat.fail { color: var(--bad); background: var(--bad-soft); }
+  .tstat.no { color: var(--bad); background: var(--bad-soft); }
+  .tstat.yes { color: var(--good); background: var(--good-soft); }
+  .tstat.partial { color: var(--warn); background: var(--warn-soft); }
+
+  .mtbl .trow { grid-template-columns: .9fr 1.45fr .85fr 1.5fr; align-items: start; }
+  .btbl .trow { grid-template-columns: 1.05fr .45fr .65fr 1.35fr 1.6fr; align-items: start; }
+  .gtbl .trow { grid-template-columns: 1fr 1.35fr 1.15fr; align-items: start; }
+  .atbl .trow { grid-template-columns: 72px 1.25fr 72px 1.55fr; align-items: start; }
+  .atbl .tstat { justify-self: start; margin-top: 1px; }
+  .atbl .cell.plain { color: var(--fg); }
+  .atbl .cell.evi { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); overflow-wrap: break-word; word-break: normal; }
+  .atbl .cell.evi .mono { color: var(--fg); }
+  .gtbl .tstat { justify-self: start; }
+
+  /* --- 通用面板 --- */
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .panel h3 { margin: 0; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .panel p { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .panel p b { color: var(--fg); }
+
+  .badge { font-family: "IBM Plex Mono", monospace; font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px dashed; letter-spacing: .03em; white-space: nowrap; }
+  .badge.ok { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .badge.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .badge.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+
+  .call { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; margin: 0; line-height: 1.6; }
+
+  /* --- 手动算一次 --- */
+  .sim { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 820px) { .sim { grid-template-columns: 1fr; } }
+  .sim-actions { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 9px; }
+  .sim-actions h3 { margin: 0 0 2px; font-size: 13.5px; }
+  .sim-grp { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
+  .sim-btn { font-family: inherit; font-size: 12.5px; text-align: left; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--fg); cursor: pointer; }
+  .sim-btn:hover { border-color: var(--accent); }
+  .sim-btn.ghost { border-style: dashed; color: var(--muted); }
+  .sim-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sim-k { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted); margin-left: 6px; }
+  .sim-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .sim-states { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sim-state { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; background: var(--surface-2); }
+  .sim-key { font-size: 11px; color: var(--muted); }
+  .sim-chip { font-family: "IBM Plex Mono", monospace; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+  .sim-chip.none { color: var(--faint); border-style: dashed; }
+  .sim-chip.pending { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .sim-chip.good { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .sim-chip.end { color: var(--muted); }
+  .sim-msg { font-size: 12.5px; color: var(--muted); margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); min-height: 38px; }
+  .sim-msg.ok { color: var(--fg); border-left: 3px solid var(--accent); }
+  .sim-msg.err { color: var(--bad); border-left: 3px solid var(--bad); background: var(--bad-soft); }
+  .sim-hits { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 34px; }
+  .hit { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; padding: 3px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
+  .hit.rel { border-color: var(--good); color: var(--good); background: var(--good-soft); }
+  .hit.dup { border-color: var(--warn); color: var(--warn); background: var(--warn-soft); text-decoration: line-through; }
+  .hit.irr { color: var(--muted); border-style: dashed; }
+  .hit-rank { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--faint); margin-right: 4px; }
+
+  .note { margin-top: 16px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .note b { color: var(--fg); }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 23px; }
+    .flow { gap: 2px; padding: 12px 8px; }
+    .flow-step { min-width: 0; padding: 2px 4px; }
+    .farrow { font-size: 15px; }
+    .trow, .mtbl .trow, .btbl .trow, .gtbl .trow, .atbl .trow { grid-template-columns: 1fr; gap: 4px; }
+    .trow.head { display: none; }
+    .tstat { justify-self: start; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="kicker">Harbor · Purchase Agent · S12</p>
+    <h1>先造尺，再量两遍</h1>
+    <p class="sub">S12 不动检索，只给检索装一把<b>可复算</b>的尺子。金标不手写：人工种子指向目录里的产品线，标签由「概念词全命中 ∧ 硬约束满足」推导出来，再按 canonical 隔离切分、冻结成带哈希的文件。之后每个候选版本各跑一次，两个同配置的报告才进得了同一道门。</p>
+    <div class="chips">
+      <span class="chip accent">53 cases · 29 seeds</span>
+      <span class="chip accent">8 个失败模式桶</span>
+      <span class="chip">test 15 / dev 38</span>
+      <span class="chip soft">cases_sha256 8879776…</span>
+      <span class="chip">6 个指标 · 纯函数</span>
+      <span class="chip good">71 eval tests · 630 total</span>
+    </div>
+
+    <div class="flow" aria-label="S12 流程">
+      <div class="flow-step"><span class="fidx">①</span><span class="fname">人工种子</span><span class="fcount">29 · 8 桶</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">失败模式驱动</span></div>
+      <div class="flow-step"><span class="fidx">②</span><span class="fname">推导金标</span><span class="fcount">目录事实</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">不手写标签</span></div>
+      <div class="flow-step"><span class="fidx">③</span><span class="fname">隔离切分</span><span class="fcount">union-find · 30%</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">同 canonical 不跨边</span></div>
+      <div class="flow-step"><span class="fidx">④</span><span class="fname">冻结</span><span class="fcount">cases_sha256</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">改动可检测</span></div>
+      <div class="flow-step"><span class="fidx">⑤</span><span class="fname">单次运行</span><span class="fcount">53 次 search</span></div>
+      <div class="flow-link"><span class="farrow">→</span><span class="fwhat">逐例记录</span></div>
+      <div class="flow-step"><span class="fidx">⑥</span><span class="fname">成对门禁</span><span class="fcount">baseline vs candidate</span></div>
+    </div>
+    <p class="hint">上半张图是「造尺」：离线、可复算、目录变更时重跑一次。下半张图是「量」：每个候选版本跑一次，两个报告才能进同一道门。</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2 class="mhead">一张图看完整条评测链</h2>
+  <p class="msub">横轴是时间，纵轴是职责。<b>造集层</b>只依赖目录，不调用任何模型；<b>运行层</b>只做一次 search 并原样记录，不修排序、不重试；<b>汇总层</b>把逐例结果折成可读的数字；<b>门禁层</b>先判断两份报告是否可比，再判断有没有退步。</p>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 730" role="img" aria-label="S12 评测流程图。造集层离线执行：人工种子指向目录产品线，推导函数把同时满足全部概念词和硬约束的商品归为相关 canonical，自检检查桶配额、空标签、类目是否存在、期望空是否真的无命中，union-find 把共享 canonical 的种子并为组件后按结构优先和约三成目标切分，最后计算 cases_sha256 并冻结成 JSON。运行层对每个候选版本执行一次：校验哈希后打开与 product_search 相同的 Qdrant、embedder 和 reranker，用第一条用例预热但不计分，然后逐条检索；正例计算 NDCG、Recall 和精度，空例只判断是否返回零条，同时对展示商品逐条审计预算、材质和投递违规并记录商品 id。汇总层对正例做宏平均、空例单独平均，违规率按用例与约束对加权且无适用时为未知，延迟用 nearest-rank 求 P95，并按桶和切分再算一遍。门禁层先检查七项可比性并拒绝任何降级用例，再检查四项指标下降不超过 0.01、三类违规率上升不超过 0.01、延迟 P95 不超过 1.2 倍，最后以退出码 0 或 1 给出结论。">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+          <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+          </marker>
+          <marker id="arr-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--bad)"/>
+          </marker>
+          <marker id="arr-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--good)"/>
+          </marker>
+        </defs>
+
+        <!-- lanes -->
+        <rect x="0" y="24" width="1000" height="126" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <rect x="0" y="176" width="1000" height="214" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <rect x="0" y="416" width="1000" height="120" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <rect x="0" y="572" width="1000" height="140" rx="12" fill="var(--surface)" stroke="var(--border)"/>
+        <text class="lane-label" x="14" y="48">造集层</text>
+        <text class="lane-sub" x="14" y="62">离线 · 目录变更时一次</text>
+        <text class="lane-label" x="14" y="200">运行层</text>
+        <text class="lane-sub" x="14" y="214">每个候选版本一次</text>
+        <text class="lane-label" x="14" y="440">汇总层</text>
+        <text class="lane-sub" x="14" y="454">report</text>
+        <text class="lane-label" x="14" y="596">门禁层</text>
+        <text class="lane-sub" x="14" y="610">compare</text>
+
+        <!-- lane A -->
+        <rect x="90" y="52" width="155" height="72" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="76">① 人工种子</text>
+        <text class="box-sub" x="104" y="94">seeds.py</text>
+        <text class="box-sub-accent" x="104" y="108">29 条 · 8 个桶</text>
+
+        <rect x="265" y="52" width="175" height="72" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="279" y="76">② 推导金标</text>
+        <text class="box-sub" x="279" y="94">concept_terms 全命中</text>
+        <text class="box-sub" x="279" y="108">∧ matches(spec)</text>
+
+        <rect x="460" y="52" width="165" height="72" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="474" y="76">③ 自检</text>
+        <text class="box-sub" x="474" y="94">配额 · 空标签</text>
+        <text class="box-sub" x="474" y="108">类目 · 期望空</text>
+
+        <rect x="645" y="52" width="165" height="72" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="659" y="76">④ 隔离切分</text>
+        <text class="box-sub" x="659" y="94">union-find 组件</text>
+        <text class="box-sub" x="659" y="108">结构优先 · 约 30%</text>
+
+        <rect x="830" y="52" width="150" height="72" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="844" y="76">⑤ 冻结</text>
+        <text class="box-sub" x="844" y="94">cases_sha256</text>
+        <text class="box-sub" x="844" y="108">golden-v1.json</text>
+
+        <line x1="245" y1="88" x2="263" y2="88" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="440" y1="88" x2="458" y2="88" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="625" y1="88" x2="643" y2="88" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="810" y1="88" x2="828" y2="88" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <!-- lane A -> lane B -->
+        <polyline points="905,124 905,148 170,148 170,202" fill="none" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+        <text class="edge-label" x="540" y="142" text-anchor="middle">只读文件 · 每次运行先重算哈希</text>
+
+        <!-- lane B row 1 -->
+        <rect x="90" y="204" width="160" height="70" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="104" y="228">⑥ verify</text>
+        <text class="box-sub" x="104" y="246">重算 cases_sha256</text>
+        <text class="box-sub" x="104" y="260">改动 → 拒绝</text>
+
+        <rect x="280" y="204" width="190" height="70" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="294" y="228">⑦ 打开服务</text>
+        <text class="box-sub" x="294" y="246">Qdrant · embedder</text>
+        <text class="box-sub" x="294" y="260">reranker · 同一份</text>
+
+        <rect x="500" y="204" width="180" height="70" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="514" y="228">⑧ 预热</text>
+        <text class="box-sub" x="514" y="246">第一例只热身</text>
+        <text class="box-sub" x="514" y="260">延迟单记 · 不计分</text>
+
+        <rect x="710" y="204" width="270" height="70" rx="10" fill="var(--soft-soft)" stroke="var(--soft)" stroke-dasharray="5 4"/>
+        <text class="box-title" x="724" y="228">RunReport</text>
+        <text class="box-sub" x="724" y="246">53 例逐例 CaseResult</text>
+        <text class="box-sub" x="724" y="260">golden · catalog · fingerprint</text>
+
+        <line x1="250" y1="239" x2="278" y2="239" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="470" y1="239" x2="498" y2="239" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="680" y1="239" x2="708" y2="239" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <!-- lane B row 2 -->
+        <rect x="90" y="300" width="185" height="70" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="324">⑨ 逐例检索</text>
+        <text class="box-sub" x="104" y="342">search(q, spec, limit)</text>
+        <text class="box-sub" x="104" y="356">hits 原样截断</text>
+
+        <rect x="305" y="300" width="195" height="70" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="319" y="324">⑩ 判分</text>
+        <text class="box-sub" x="319" y="342">正例 → 三指标</text>
+        <text class="box-sub" x="319" y="356">空例 → hits == 0</text>
+
+        <rect x="530" y="300" width="205" height="70" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="544" y="324">⑪ 违规审计</text>
+        <text class="box-sub" x="544" y="342">budget · material</text>
+        <text class="box-sub" x="544" y="356">delivery（诊断）</text>
+
+        <rect x="765" y="300" width="215" height="70" rx="10" fill="var(--bad-soft)" stroke="var(--bad)" stroke-dasharray="5 4"/>
+        <text class="box-title bad" x="779" y="324">不修不补</text>
+        <text class="box-sub" x="779" y="342">不改排序 · 不重试</text>
+        <text class="box-sub" x="779" y="356">否则量的是 runner</text>
+
+        <polyline points="590,274 590,288 182,288 182,300" fill="none" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="275" y1="335" x2="303" y2="335" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="500" y1="335" x2="528" y2="335" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="735" y1="335" x2="763" y2="335" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <!-- per-case loop -->
+        <polyline points="650,370 650,388 182,388 182,372" fill="none" stroke="var(--accent)" stroke-dasharray="5 4" marker-end="url(#arr-accent)"/>
+        <text class="edge-label" x="420" y="383" text-anchor="middle">下一条用例，直到第 53 条</text>
+
+        <!-- lane B -> lane C -->
+        <polyline points="182,370 182,404 60,404 60,444 88,444" fill="none" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <text class="edge-label" x="70" y="410" text-anchor="start">全部跑完</text>
+
+        <!-- lane C -->
+        <rect x="90" y="444" width="190" height="76" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="104" y="468">⑫ 宏平均</text>
+        <text class="box-sub" x="104" y="486">正例一票</text>
+        <text class="box-sub" x="104" y="500">空例单独平均</text>
+
+        <rect x="310" y="444" width="190" height="76" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="324" y="468">⑬ 违规率</text>
+        <text class="box-sub" x="324" y="486">(case, 约束) 对加权</text>
+        <text class="box-sub" x="324" y="500">无适用 → None</text>
+
+        <rect x="530" y="444" width="170" height="76" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="544" y="468">⑭ P95</text>
+        <text class="box-sub" x="544" y="486">nearest-rank</text>
+        <text class="box-sub" x="544" y="500">n &lt; 20 标记</text>
+
+        <rect x="730" y="444" width="190" height="76" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="744" y="468">⑮ 切片</text>
+        <text class="box-sub" x="744" y="486">by_bucket</text>
+        <text class="box-sub" x="744" y="500">by_split</text>
+
+        <line x1="280" y1="482" x2="308" y2="482" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="500" y1="482" x2="528" y2="482" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="700" y1="482" x2="728" y2="482" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <!-- fork into the gate -->
+        <rect x="70" y="540" width="280" height="24" rx="8" fill="var(--surface-2)" stroke="var(--border)" stroke-dasharray="4 3"/>
+        <text class="box-sub" x="84" y="556">baseline.json · candidate.json</text>
+        <line x1="210" y1="564" x2="210" y2="582" stroke="var(--accent)" marker-end="url(#arr-accent)"/>
+
+        <!-- lane D -->
+        <rect x="70" y="584" width="180" height="76" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text class="box-title" x="84" y="608">⑯ 可比性</text>
+        <text class="box-sub" x="84" y="626">7 项一致</text>
+        <text class="box-sub" x="84" y="640">且无降级用例</text>
+
+        <rect x="275" y="584" width="170" height="76" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="289" y="608">⑰ 指标</text>
+        <text class="box-sub" x="289" y="626">Δ ≥ -0.01</text>
+        <text class="box-sub" x="289" y="640">四项</text>
+
+        <rect x="470" y="584" width="165" height="76" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="484" y="608">⑱ 违规</text>
+        <text class="box-sub" x="484" y="626">Δ ≤ +0.01</text>
+        <text class="box-sub" x="484" y="640">三类</text>
+
+        <rect x="660" y="584" width="145" height="76" rx="10" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text class="box-title" x="674" y="608">⑲ 延迟</text>
+        <text class="box-sub" x="674" y="626">P95 ratio</text>
+        <text class="box-sub" x="674" y="640">≤ 1.2x</text>
+
+        <rect x="830" y="584" width="150" height="76" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
+        <text class="box-title good" x="844" y="608">⑳ 结论</text>
+        <text class="box-sub" x="844" y="626">passed ?</text>
+        <text class="box-sub" x="844" y="640">exit 0 / exit 1</text>
+
+        <line x1="250" y1="622" x2="273" y2="622" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="445" y1="622" x2="468" y2="622" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="635" y1="622" x2="658" y2="622" stroke="var(--muted)" marker-end="url(#arr)"/>
+        <line x1="805" y1="622" x2="828" y2="622" stroke="var(--muted)" marker-end="url(#arr)"/>
+
+        <rect x="70" y="676" width="180" height="26" rx="8" fill="var(--bad-soft)" stroke="var(--bad)" stroke-dasharray="5 4"/>
+        <text class="box-sub" x="84" y="693">不可比 → 直接 false</text>
+        <line x1="160" y1="660" x2="160" y2="674" stroke="var(--bad)" marker-end="url(#arr-bad)"/>
+
+        <rect x="275" y="676" width="520" height="26" rx="8" fill="var(--bad-soft)" stroke="var(--bad)" stroke-dasharray="5 4"/>
+        <text class="box-sub" x="289" y="693">任何一项不过 → passed=false · 不重跑、不放宽</text>
+        <line x1="552" y1="660" x2="552" y2="674" stroke="var(--bad)" marker-end="url(#arr-bad)"/>
+      </svg>
+    </div>
+    <figcaption><b>两个独立性，撑起整张图。</b>造集只读目录，所以同一份目录永远推出同一份金标；运行只记录检索返回，所以任何一个候选版本的分数都可以复算。<b>门禁不比较「好」与「更好」，只比较同配置的两次运行：</b>尺子、目录、limit、索引指纹、用例列表、降级状态任何一项不同，它连指标都不算，直接判不可比。</figcaption>
+  </figure>
+
+  <h2 class="mhead">六个指标，各自的边界</h2>
+  <p class="msub">指标最容易错的地方不是公式，而是<b>分母</b>和<b>未知值</b>。下面每一行都按当前代码的口径写；括号里是它刻意不做的事。</p>
+
+  <div class="tbl mtbl" role="table" aria-label="S12 六个指标">
+    <div class="trow head" role="row"><span>指标</span><span>怎么算</span><span>分母</span><span>边界行为</span></div>
+    <div class="trow" role="row">
+      <span class="cell">NDCG@5</span>
+      <span class="cell plain">DCG = Σ 1 / log₂(rank + 1)，只有<b>首次</b>命中某个相关 canonical 才得 gain 1</span>
+      <span class="cell">IDCG 取前 min(5, R) 位</span>
+      <span class="cell plain">重复 canonical <b>占槽但得 0</b>；只取真实前 5 条，<b>不补位</b></span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">Recall@5</span>
+      <span class="cell plain">前 5 条里出现的<b>唯一</b>相关 canonical / 全部相关 canonical</span>
+      <span class="cell">R = 相关 canonical 数</span>
+      <span class="cell plain">R &gt; 5 时 1.0 不可达——这是诚实读数，不是缺陷</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">返回结果精度</span>
+      <span class="cell plain">前 5 条里唯一相关 canonical / <b>实际展示条数</b></span>
+      <span class="cell">实际返回数（重复占位）</span>
+      <span class="cell plain">正例返回 0 条记 0 分，<b>不跳过</b></span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">硬约束违规率</span>
+      <span class="cell plain">至少有一个展示商品违规的 <b>(case, 约束) 对</b> / 适用对</span>
+      <span class="cell">适用对数</span>
+      <span class="cell plain">预算 / 材质 / 投递分开统计；<b>无覆盖 = None，不是 0%</b></span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">预期无结果准确率</span>
+      <span class="cell plain">期望空且真的返回 0 条的用例 / 全部期望空用例</span>
+      <span class="cell">空例数</span>
+      <span class="cell plain">不混入正例的相关性平均；空例也不进 NDCG/Recall/精度</span>
+    </div>
+    <div class="trow" role="row">
+      <span class="cell">检索耗时 P95</span>
+      <span class="cell plain">nearest-rank：排序后取第 <b>ceil(0.95 × N)</b> 个值</span>
+      <span class="cell">全部用例的 search 延迟</span>
+      <span class="cell plain">预热不计分；无样本 → None；n &lt; 20 标记小样本</span>
+    </div>
+  </div>
+  <div class="note"><b>未知与零是两件事。</b>违规率在没有适用用例时返回 <span class="mono">None</span>，P95 在没有样本时也返回 <span class="mono">None</span>。若把它们折成 0，一个覆盖率只有 3% 的版本会看起来完美——门禁也就失去了意义。</div>
+
+  <h2 class="mhead">8 个失败模式桶，53 条用例</h2>
+  <p class="msub">种子不是「随便几个查询」，而是每条对应一种检索容易出错的方式。金标由目录里的产品线推导，所以桶里的用例数和标签数都可复算。</p>
+
+  <div class="tbl btbl" role="table" aria-label="S12 失败模式桶">
+    <div class="trow head" role="row"><span>桶</span><span>种子</span><span>dev / test</span><span>它抓什么</span><span>目录事实</span></div>
+    <div class="trow" role="row"><span class="cell">budget_boundary</span><span class="cell">4</span><span class="cell">6 / 2</span><span class="cell plain">预算正好切在价格档位之间，标签集应随预算变化</span><span class="cell plain">GX-25 / 28 / 29 / 22 四条线</span></div>
+    <div class="trow" role="row"><span class="cell">material_exclusion</span><span class="cell">4</span><span class="cell">6 / 2</span><span class="cell plain">宽泛词命中混合材质，排除后只剩目标线</span><span class="cell plain">排除「天然材料」后各剩 4 个 canonical</span></div>
+    <div class="trow" role="row"><span class="cell">delivery</span><span class="cell">4</span><span class="cell">6 / 2</span><span class="cell plain">目的地不发货——检索无此输入，只做诊断</span><span class="cell plain">US / JP / SG / CN；536 个商品不发 CN</span></div>
+    <div class="trow" role="row"><span class="cell">cross_currency</span><span class="cell">4</span><span class="cell">6 / 2</span><span class="cell plain">预算用买家币种说，换算后落在不同档位</span><span class="cell plain">USD / EUR / JPY / SGD 四个预算</span></div>
+    <div class="trow" role="row"><span class="cell">duplicate_canonical</span><span class="cell">4</span><span class="cell">6 / 2</span><span class="cell plain">同一 canonical 有 27 个本地化/币种变体，去重后只应出现一次</span><span class="cell plain">ML-01 / 08 / 10 / 04</span></div>
+    <div class="trow" role="row"><span class="cell">category_missing</span><span class="cell">2</span><span class="cell">1 / 1</span><span class="cell plain">目录里不存在的类目，应返回空而不是近似品类</span><span class="cell plain">「汽车用品」「运动户外」</span></div>
+    <div class="trow" role="row"><span class="cell">constraint_empty</span><span class="cell">3</span><span class="cell">1 / 2</span><span class="cell plain">商品存在，但预算或重量约束不可能满足</span><span class="cell plain">¥10 保温壶 / $1 耳机 / 50g 行李箱</span></div>
+    <div class="trow" role="row"><span class="cell">semantic_vague</span><span class="cell">4</span><span class="cell">6 / 2</span><span class="cell plain">用户说的是场景，不是商品标签词</span><span class="cell plain">GX-17 / 20 / 12 / 02</span></div>
+  </div>
+
+  <h2 class="mhead">切分：整条产品线一起走</h2>
+  <p class="msub">如果把同一个 canonical 的变体一边放 dev 一边放 test，test 分数就是背答案。切分因此先合并、再分配，最后才看比例。</p>
+
+  <div class="twocol">
+    <div class="panel">
+      <h3>1 · 合并 <span class="badge ok">union-find</span></h3>
+      <pre class="call">seed_a → canonical X ─┐
+seed_b → canonical X ─┴─ 同一组件
+seed_c → canonical Y ─── 另一组件
+
+# 组件必须整体进 dev 或整体进 test
+# 否则 X 同时出现在两边 → 泄漏</pre>
+      <p>共享任意一个相关 canonical 的种子先并成一个组件。<b>切分的单位是组件，不是种子。</b></p>
+    </div>
+    <div class="panel">
+      <h3>2 · 分配 <span class="badge warn">结构优先</span></h3>
+      <pre class="call">目标 = round(总用例 × 0.30) = 16
+实际 test = 15（28.3%）
+
+1. 每个跨 ≥2 组件的桶，
+   先拿走一个 test 组件，
+   同时保证至少留一个 dev
+2. 剩余预算按组件从小到大填
+3. 放不下的组件留 dev</pre>
+      <p>先保证<b>每个桶两边都有</b>，再追求比例。跨桶的组件不会为了凑数被拆开。</p>
+    </div>
+  </div>
+
+  <div class="note"><b>任一自检失败就拒绝构建，其中最关键的四种是：</b>桶配额不足；正例推不出标签；类目不存在；<span class="mono">expected_empty</span> 的 spec 实际能命中商品。构建完成后还有两条全局检查：同一 canonical 不得跨切分，跨 ≥2 组件的桶必须两边都有。最后 <span class="mono">cases_sha256</span> 写进 manifest，<span class="mono">verify</span> 每次运行前重算。</div>
+
+  <h2 class="mhead">成对门禁：先问「能不能比」，再问「有没有退」</h2>
+  <p class="msub">门禁默认值只容忍噪声，不容忍退步。阈值可在 CLI 上覆盖，但可比性检查没有开关。</p>
+
+  <div class="tbl gtbl" role="table" aria-label="S12 成对门禁">
+    <div class="trow head" role="row"><span>检查</span><span>规则</span><span>不通过时</span></div>
+    <div class="trow" role="row"><span class="cell">同一把尺</span><span class="cell plain"><span class="mono">cases_sha256</span> 完全相同</span><span class="tstat no">不可比</span></div>
+    <div class="trow" role="row"><span class="cell">同一目录</span><span class="cell plain"><span class="mono">catalog_sha256</span> 完全相同</span><span class="tstat no">不可比</span></div>
+    <div class="trow" role="row"><span class="cell">同一口径</span><span class="cell plain"><span class="mono">limit</span>、<span class="mono">allow_degraded</span>、索引指纹、用例列表一致</span><span class="tstat no">不可比</span></div>
+    <div class="trow" role="row"><span class="cell">无降级</span><span class="cell plain">两侧 <span class="mono">degraded_case_count == 0</span></span><span class="tstat no">不可比</span></div>
+    <div class="trow" role="row"><span class="cell">相关性</span><span class="cell plain">NDCG / Recall / 精度 / 空例准确率，Δ ≥ -0.01</span><span class="tstat fail">failed</span></div>
+    <div class="trow" role="row"><span class="cell">硬约束</span><span class="cell plain">budget / material / delivery 违规率，Δ ≤ +0.01</span><span class="tstat fail">failed</span></div>
+    <div class="trow" role="row"><span class="cell">延迟</span><span class="cell plain">P95 ratio ≤ 1.2x；任一侧无样本则跳过该项</span><span class="tstat fail">failed</span></div>
+  </div>
+  <div class="note"><b>为什么不可比时不算指标？</b>两份不同金标、不同目录或不同 limit 的报告，差值没有含义。先判不可比，是为了避免用一个「看起来变好了」的数字掩盖「量的根本不是同一件事」。CLI 在不可比或 failed 时都返回非零退出码。</div>
+
+  <h2 class="mhead">手动算一次</h2>
+  <p class="msub">同一组相关标签 <span class="mono">R = {A, B}</span>（「多于 5 个标签」场景是 7 个）。点一个场景，看返回序列怎么变成三个数——尤其是重复项怎么占掉分母。</p>
+
+  <div class="sim">
+    <div class="sim-actions">
+      <h3>返回序列</h3>
+      <span class="sim-grp">R = {A, B}</span>
+      <button class="sim-btn" data-scn="perfect">两条全中，且排在最前 <span class="sim-k">[A, B]</span></button>
+      <button class="sim-btn" data-scn="rank2">第一条不相关，相关项排 2、3 <span class="sim-k">[X, A, B]</span></button>
+      <button class="sim-btn" data-scn="duplicate">相关项重复，槽位被吃掉 <span class="sim-k">[A, A, X, Y, Y]</span></button>
+      <span class="sim-grp">R 有 7 个标签</span>
+      <button class="sim-btn" data-scn="many">前 5 条全中，标签还有剩 <span class="sim-k">[A, B, C, D, E]</span></button>
+      <span class="sim-grp">边界</span>
+      <button class="sim-btn ghost" data-scn="zero">正例返回 0 条 <span class="sim-k">[]</span></button>
+    </div>
+    <div class="sim-panel">
+      <div class="sim-states" aria-live="polite">
+        <div class="sim-state"><span class="sim-key">NDCG@5</span><span id="m-ndcg"></span></div>
+        <div class="sim-state"><span class="sim-key">Recall@5</span><span id="m-recall"></span></div>
+        <div class="sim-state"><span class="sim-key">精度@5</span><span id="m-precision"></span></div>
+      </div>
+      <div class="sim-hits" id="sim-hits" aria-label="返回序列"></div>
+      <p class="sim-msg" id="sim-msg"></p>
+    </div>
+  </div>
+
+  <h2 class="mhead">S12 验收 6 条</h2>
+  <p class="msub">每一条都对着当前代码核对过；最后一条依赖前五条。测试全部离线：假 embedder、假搜索服务，<b>零远程 embedding 调用</b>。最近一次全量 <span class="mono">uv run pytest -q</span>：<b>630 passed</b>，其中 eval 71 条。</p>
+
+  <div class="tbl atbl" role="table" aria-label="S12 验收清单">
+    <div class="trow head" role="row"><span>编号</span><span>验收项</span><span>结论</span><span>代码证据</span></div>
+    <div class="trow" role="row"><span class="cell">S12-1</span><span class="cell plain">六个指标的边界与定义一致</span><span class="tstat pass">PASS</span><span class="cell evi"><span class="mono">metrics.py</span> 五个纯函数；重复占槽得 0、不补位、R &gt; 5 时 Recall 不可达 1、0 返回记 0、空样本 P95 为 <span class="mono">None</span>，均由 <span class="mono">test_eval_metrics.py</span> 的 16 条用例钉住。</span></div>
+    <div class="trow" role="row"><span class="cell">S12-2</span><span class="cell plain">金标只由目录事实推导，可复算</span><span class="tstat pass">PASS</span><span class="cell evi"><span class="mono">derive_relevant</span>：概念词全部命中 ∧ <span class="mono">matches(product, spec)</span> → <span class="mono">canonical_product_id</span>；<span class="mono">test_eval_seeds_real_catalog.py</span> 对真实目录重跑，并与提交的 artifact 逐字段比对。</span></div>
+    <div class="trow" role="row"><span class="cell">S12-3</span><span class="cell plain">同一 canonical 不跨 dev/test</span><span class="tstat pass">PASS</span><span class="cell evi"><span class="mono">_assign_splits</span> 先 union-find 合并共享 canonical 的种子，再整组件分配；<span class="mono">_check_cases</span> 对泄漏和「跨多组件的桶只有单边」分别报错。</span></div>
+    <div class="trow" role="row"><span class="cell">S12-4</span><span class="cell plain">冻结后的改动可被检测</span><span class="tstat pass">PASS</span><span class="cell evi"><span class="mono">freeze</span> 写入 <span class="mono">cases_sha256</span>，<span class="mono">verify_golden</span> 重算并比对；CLI <span class="mono">verify</span> 实跑输出 53 cases 与同一哈希；篡改用例后抛 <span class="mono">GoldenSetError</span>。</span></div>
+    <div class="trow" role="row"><span class="cell">S12-5</span><span class="cell plain">运行可复现、拒绝降级、不修饰结果</span><span class="tstat pass">PASS</span><span class="cell evi"><span class="mono">run_golden</span> 每条用例只调一次 <span class="mono">search</span>，hits 原样截断；非 <span class="mono">embedding</span> 策略默认抛 <span class="mono">EvalRunError</span>，<span class="mono">allow_degraded=True</span> 才记录；预热延迟单列且不计分。</span></div>
+    <div class="trow" role="row"><span class="cell">S12-6</span><span class="cell plain">不可比与回归都会让门禁失败</span><span class="tstat pass">PASS</span><span class="cell evi"><span class="mono">_incompatibility_reasons</span> 覆盖 7 项；<span class="mono">compare_runs</span> 只对可比对做阈值判断；<span class="mono">test_eval_cli.py</span> 验证 <span class="mono">main</span> 在 verify / compare 失败时返回非零退出码。</span></div>
+  </div>
+
+  <div class="note"><b>四个已知边界，写在结论旁边而不是脚注里。</b>① 投递违规只是诊断：检索接口没有目的地输入，不能作为门禁的硬标签。② test 集只有 15 例，-0.01 的阈值约等于「不能有一例从 1.0 掉到 0.9」，统计噪声偏大。③ <span class="mono">category_missing</span> 桶偏弱：不存在的类目会被类目过滤器直接滤空，验证的是「不崩溃」而非召回正确。④ 金标来自字面词匹配，语义改写（用户换个说法）不在覆盖范围内。</div>
+  <div class="note"><b>当前缺口：还没有真实基线。</b><span class="mono">data/eval/</span> 里只有冻结的黄金集，没有 <span class="mono">baseline.json</span> 或 <span class="mono">candidate.json</span>。跑一次真实运行需要约 53 次查询 embedding；在此之前，<span class="mono">compare</span> 没有可比对象。</div>
+</main>
+
+<script>
+  (function () {
+    var el = {
+      ndcg: document.getElementById("m-ndcg"),
+      recall: document.getElementById("m-recall"),
+      precision: document.getElementById("m-precision"),
+      hits: document.getElementById("sim-hits"),
+      msg: document.getElementById("sim-msg")
+    };
+
+    var scenarios = {
+      perfect: {
+        relevant: ["A", "B"], hits: ["A", "B"],
+        msg: "两条相关商品占据前两位：DCG 等于 IDCG，三个指标都是 1。"
+      },
+      rank2: {
+        relevant: ["A", "B"], hits: ["X", "A", "B"],
+        msg: "X 不相关但占掉第 1 位：DCG 少了 1 的 gain，NDCG 掉到 0.693。Recall 仍是 1，精度被 X 拉低到 0.667——排序变差不一定改变召回。"
+      },
+      duplicate: {
+        relevant: ["A", "B"], hits: ["A", "A", "X", "Y", "Y"],
+        msg: "第二个 A 不再得分，但仍占第 2 个槽位，后面的相关项无法补位。Recall 只剩 0.5，精度 1/5 = 0.2，NDCG 0.613。"
+      },
+      many: {
+        relevant: ["A", "B", "C", "D", "E", "F", "G"],
+        hits: ["A", "B", "C", "D", "E"],
+        msg: "前 5 条全是相关的，排序完美，但 7 个标签只召回 5 个：Recall = 5/7 ≈ 0.714。R > 5 时 1.0 本来就不可达。"
+      },
+      zero: {
+        relevant: ["A", "B"], hits: [],
+        msg: "正例返回 0 条：三个指标都记 0，而不是从平均里跳过。跳过会让「什么都搜不到」看起来无损。"
+      }
+    };
+
+    function log2(x) { return Math.log(x) / Math.LN2; }
+
+    function compute(relevant, hits) {
+      var rel = new Set(relevant);
+      var prefix = hits.slice(0, 5);
+      var seen = new Set();
+      var dcg = 0;
+      for (var i = 0; i < prefix.length; i++) {
+        var c = prefix[i];
+        if (rel.has(c) && !seen.has(c)) dcg += 1 / log2(i + 2);
+        seen.add(c);
+      }
+      var ideal = Math.min(5, rel.size);
+      var idcg = 0;
+      for (var j = 1; j <= ideal; j++) idcg += 1 / log2(j + 1);
+
+      var uniqueHits = new Set(prefix);
+      var overlap = 0;
+      uniqueHits.forEach(function (c) { if (rel.has(c)) overlap++; });
+
+      return {
+        ndcg: idcg ? dcg / idcg : 0,
+        recall: rel.size ? overlap / rel.size : 0,
+        precision: prefix.length ? overlap / prefix.length : 0
+      };
+    }
+
+    function fmt(v) { return v.toFixed(3); }
+
+    function renderHits(relevant, hits) {
+      var rel = new Set(relevant);
+      var seen = new Set();
+      var out = [];
+      if (!hits.length) {
+        out.push('<span class="hit irr">（空）</span>');
+      }
+      hits.slice(0, 5).forEach(function (c, i) {
+        var cls = "irr";
+        if (rel.has(c)) cls = seen.has(c) ? "dup" : "rel";
+        seen.add(c);
+        out.push('<span class="hit ' + cls + '"><span class="hit-rank">#' + (i + 1) + '</span>' + c + '</span>');
+      });
+      el.hits.innerHTML = out.join("");
+    }
+
+    function render(key) {
+      var scn = scenarios[key];
+      var m = compute(scn.relevant, scn.hits);
+      el.ndcg.innerHTML = '<span class="sim-chip good">' + fmt(m.ndcg) + '</span>';
+      el.recall.innerHTML = '<span class="sim-chip ' + (m.recall < 1 ? "pending" : "good") + '">' + fmt(m.recall) + '</span>';
+      el.precision.innerHTML = '<span class="sim-chip ' + (m.precision < 1 ? "pending" : "good") + '">' + fmt(m.precision) + '</span>';
+      renderHits(scn.relevant, scn.hits);
+      el.msg.className = "sim-msg ok";
+      el.msg.textContent = scn.msg;
+    }
+
+    document.querySelectorAll(".sim-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () { render(btn.getAttribute("data-scn")); });
+    });
+
+    render("perfect");
+  })();
+</script>

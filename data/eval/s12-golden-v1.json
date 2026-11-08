@@ -1,0 +1,1564 @@
+{
+  "cases": [
+    {
+      "bucket": "budget_boundary",
+      "case_id": "budget-desk-lamp-cny-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-25"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-25 阅读台灯线；189→336 CNY 档位之间切分",
+      "query": "两百元以内的阅读台灯",
+      "relevant_canonicals": [
+        "CAN-GX-25-1",
+        "CAN-GX-25-2",
+        "CAN-GX-25-3"
+      ],
+      "seed_id": "budget-desk-lamp-cny",
+      "spec": {
+        "category": "办公学习",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "两百元以内的阅读台灯",
+        "price_max_major": "200",
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "budget_boundary",
+      "case_id": "budget-desk-lamp-cny-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-25"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-25 阅读台灯线；189→336 CNY 档位之间切分",
+      "query": "书桌上看书用的台灯，预算 200 元",
+      "relevant_canonicals": [
+        "CAN-GX-25-1",
+        "CAN-GX-25-2",
+        "CAN-GX-25-3"
+      ],
+      "seed_id": "budget-desk-lamp-cny",
+      "spec": {
+        "category": "办公学习",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "书桌上看书用的台灯，预算 200 元",
+        "price_max_major": "200",
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "budget_boundary",
+      "case_id": "budget-file-folder-cny-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-28"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-28 文件收纳夹线；预算落在第一、二档之间",
+      "query": "一百元以内的文件收纳夹",
+      "relevant_canonicals": [
+        "CAN-GX-28-1",
+        "CAN-GX-28-2"
+      ],
+      "seed_id": "budget-file-folder-cny",
+      "spec": {
+        "category": "办公学习",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "一百元以内的文件收纳夹",
+        "price_max_major": "100",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "budget_boundary",
+      "case_id": "budget-file-folder-cny-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-28"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-28 文件收纳夹线；预算落在第一、二档之间",
+      "query": "办公桌上放 A4 文件的收纳夹，便宜点",
+      "relevant_canonicals": [
+        "CAN-GX-28-1",
+        "CAN-GX-28-2"
+      ],
+      "seed_id": "budget-file-folder-cny",
+      "spec": {
+        "category": "办公学习",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "办公桌上放 A4 文件的收纳夹，便宜点",
+        "price_max_major": "100",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "budget_boundary",
+      "case_id": "budget-pet-carrier-cny-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-29"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-29 宠物航空包线；377→658 CNY 档位之间切分",
+      "query": "四百元以内能带猫出门的宠物航空包",
+      "relevant_canonicals": [
+        "CAN-GX-29-1",
+        "CAN-GX-29-2",
+        "CAN-GX-29-3"
+      ],
+      "seed_id": "budget-pet-carrier-cny",
+      "spec": {
+        "category": "母婴宠物",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "四百元以内能带猫出门的宠物航空包",
+        "price_max_major": "400",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "budget_boundary",
+      "case_id": "budget-pet-carrier-cny-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-29"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-29 宠物航空包线；377→658 CNY 档位之间切分",
+      "query": "宠物外出的航空包，预算 400 元",
+      "relevant_canonicals": [
+        "CAN-GX-29-1",
+        "CAN-GX-29-2",
+        "CAN-GX-29-3"
+      ],
+      "seed_id": "budget-pet-carrier-cny",
+      "spec": {
+        "category": "母婴宠物",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "宠物外出的航空包，预算 400 元",
+        "price_max_major": "400",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "budget_boundary",
+      "case_id": "budget-utensils-cny-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-22"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-22 便携餐具线；预算落在第二档边缘",
+      "query": "一百元以内的便携餐具",
+      "relevant_canonicals": [
+        "CAN-GX-22-1",
+        "CAN-GX-22-2"
+      ],
+      "seed_id": "budget-utensils-cny",
+      "spec": {
+        "category": "厨房餐饮",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "一百元以内的便携餐具",
+        "price_max_major": "100",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "budget_boundary",
+      "case_id": "budget-utensils-cny-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-22"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-22 便携餐具线；预算落在第二档边缘",
+      "query": "上班带饭用的不锈钢便携餐具，不超过 100 元",
+      "relevant_canonicals": [
+        "CAN-GX-22-1",
+        "CAN-GX-22-2"
+      ],
+      "seed_id": "budget-utensils-cny",
+      "spec": {
+        "category": "厨房餐饮",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "上班带饭用的不锈钢便携餐具，不超过 100 元",
+        "price_max_major": "100",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "material_exclusion",
+      "case_id": "material-sleeping-bag-no-natural-q1",
+      "concept_terms": [
+        "羽绒睡袋"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "宽泛词命中 GX-15 与一条天然材料噪声品；排除后只剩 GX-15 的 4 个 canonical",
+      "query": "羽绒睡袋，不要天然材料填充的",
+      "relevant_canonicals": [
+        "CAN-GX-15-1",
+        "CAN-GX-15-2",
+        "CAN-GX-15-3",
+        "CAN-GX-15-4"
+      ],
+      "seed_id": "material-sleeping-bag-no-natural",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [
+          "天然材料"
+        ],
+        "normalized_query": "羽绒睡袋，不要天然材料填充的",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "material_exclusion",
+      "case_id": "material-sleeping-bag-no-natural-q2",
+      "concept_terms": [
+        "羽绒睡袋"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "宽泛词命中 GX-15 与一条天然材料噪声品；排除后只剩 GX-15 的 4 个 canonical",
+      "query": "露营用睡袋，排除天然材料",
+      "relevant_canonicals": [
+        "CAN-GX-15-1",
+        "CAN-GX-15-2",
+        "CAN-GX-15-3",
+        "CAN-GX-15-4"
+      ],
+      "seed_id": "material-sleeping-bag-no-natural",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [
+          "天然材料"
+        ],
+        "normalized_query": "露营用睡袋，排除天然材料",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "material_exclusion",
+      "case_id": "material-camping-lantern-no-natural-q1",
+      "concept_terms": [
+        "露营灯"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "排除天然材料后剩 GX-13 的 4 个 canonical",
+      "query": "露营灯，不要天然材料外壳",
+      "relevant_canonicals": [
+        "CAN-GX-13-1",
+        "CAN-GX-13-2",
+        "CAN-GX-13-3",
+        "CAN-GX-13-4"
+      ],
+      "seed_id": "material-camping-lantern-no-natural",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [
+          "天然材料"
+        ],
+        "normalized_query": "露营灯，不要天然材料外壳",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "material_exclusion",
+      "case_id": "material-camping-lantern-no-natural-q2",
+      "concept_terms": [
+        "露营灯"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "排除天然材料后剩 GX-13 的 4 个 canonical",
+      "query": "户外露营照明灯，不要天然材质",
+      "relevant_canonicals": [
+        "CAN-GX-13-1",
+        "CAN-GX-13-2",
+        "CAN-GX-13-3",
+        "CAN-GX-13-4"
+      ],
+      "seed_id": "material-camping-lantern-no-natural",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [
+          "天然材料"
+        ],
+        "normalized_query": "户外露营照明灯，不要天然材质",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "material_exclusion",
+      "case_id": "material-trekking-pole-no-natural-q1",
+      "concept_terms": [
+        "登山杖"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "排除天然材料噪声后剩 GX-14 的 4 个 canonical",
+      "query": "登山杖，不要天然材料手柄",
+      "relevant_canonicals": [
+        "CAN-GX-14-1",
+        "CAN-GX-14-2",
+        "CAN-GX-14-3",
+        "CAN-GX-14-4"
+      ],
+      "seed_id": "material-trekking-pole-no-natural",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [
+          "天然材料"
+        ],
+        "normalized_query": "登山杖，不要天然材料手柄",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "material_exclusion",
+      "case_id": "material-trekking-pole-no-natural-q2",
+      "concept_terms": [
+        "登山杖"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "排除天然材料噪声后剩 GX-14 的 4 个 canonical",
+      "query": "徒步登山杖，避开天然材料",
+      "relevant_canonicals": [
+        "CAN-GX-14-1",
+        "CAN-GX-14-2",
+        "CAN-GX-14-3",
+        "CAN-GX-14-4"
+      ],
+      "seed_id": "material-trekking-pole-no-natural",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [
+          "天然材料"
+        ],
+        "normalized_query": "徒步登山杖，避开天然材料",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "material_exclusion",
+      "case_id": "material-earbuds-no-natural-q1",
+      "concept_terms": [
+        "蓝牙耳机"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "排除天然材料噪声后剩 GX-06 的 4 个 canonical",
+      "query": "蓝牙耳机，不要天然材料的",
+      "relevant_canonicals": [
+        "CAN-GX-06-1",
+        "CAN-GX-06-2",
+        "CAN-GX-06-3",
+        "CAN-GX-06-4"
+      ],
+      "seed_id": "material-earbuds-no-natural",
+      "spec": {
+        "category": "数码配件",
+        "currency": "CNY",
+        "excluded_material_tags": [
+          "天然材料"
+        ],
+        "normalized_query": "蓝牙耳机，不要天然材料的",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "material_exclusion",
+      "case_id": "material-earbuds-no-natural-q2",
+      "concept_terms": [
+        "蓝牙耳机"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "排除天然材料噪声后剩 GX-06 的 4 个 canonical",
+      "query": "通勤用的蓝牙耳机，排除天然材质",
+      "relevant_canonicals": [
+        "CAN-GX-06-1",
+        "CAN-GX-06-2",
+        "CAN-GX-06-3",
+        "CAN-GX-06-4"
+      ],
+      "seed_id": "material-earbuds-no-natural",
+      "spec": {
+        "category": "数码配件",
+        "currency": "CNY",
+        "excluded_material_tags": [
+          "天然材料"
+        ],
+        "normalized_query": "通勤用的蓝牙耳机，排除天然材质",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "delivery",
+      "case_id": "delivery-pet-fountain-us-q1",
+      "concept_terms": [
+        "宠物饮水器"
+      ],
+      "destination_country": "US",
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "检索不接收收货地；美国不发货的命中只计入诊断违规",
+      "query": "给猫买的自动饮水器，寄到美国",
+      "relevant_canonicals": [
+        "CAN-GX-30-1",
+        "CAN-GX-30-2",
+        "CAN-GX-30-3",
+        "CAN-GX-30-4"
+      ],
+      "seed_id": "delivery-pet-fountain-us",
+      "spec": {
+        "category": "母婴宠物",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "给猫买的自动饮水器，寄到美国",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "delivery",
+      "case_id": "delivery-pet-fountain-us-q2",
+      "concept_terms": [
+        "宠物饮水器"
+      ],
+      "destination_country": "US",
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "检索不接收收货地；美国不发货的命中只计入诊断违规",
+      "query": "宠物饮水器，收货地址在美国",
+      "relevant_canonicals": [
+        "CAN-GX-30-1",
+        "CAN-GX-30-2",
+        "CAN-GX-30-3",
+        "CAN-GX-30-4"
+      ],
+      "seed_id": "delivery-pet-fountain-us",
+      "spec": {
+        "category": "母婴宠物",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "宠物饮水器，收货地址在美国",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "delivery",
+      "case_id": "delivery-suitcase-jp-q1",
+      "concept_terms": [
+        "行李箱"
+      ],
+      "destination_country": "JP",
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "宽泛词含 LEGACY 噪声；日本不发货的命中只计入诊断",
+      "query": "出差用的行李箱，寄日本",
+      "relevant_canonicals": [
+        "CAN-GX-03-1",
+        "CAN-GX-03-2",
+        "CAN-GX-03-3",
+        "CAN-GX-03-4",
+        "CAN-LEGACY-001",
+        "CAN-LEGACY-014",
+        "CAN-LEGACY-026"
+      ],
+      "seed_id": "delivery-suitcase-jp",
+      "spec": {
+        "category": "旅行装备",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "出差用的行李箱，寄日本",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "delivery",
+      "case_id": "delivery-suitcase-jp-q2",
+      "concept_terms": [
+        "行李箱"
+      ],
+      "destination_country": "JP",
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "宽泛词含 LEGACY 噪声；日本不发货的命中只计入诊断",
+      "query": "28 寸行李箱，发到日本",
+      "relevant_canonicals": [
+        "CAN-GX-03-1",
+        "CAN-GX-03-2",
+        "CAN-GX-03-3",
+        "CAN-GX-03-4",
+        "CAN-LEGACY-001",
+        "CAN-LEGACY-014",
+        "CAN-LEGACY-026"
+      ],
+      "seed_id": "delivery-suitcase-jp",
+      "spec": {
+        "category": "旅行装备",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "28 寸行李箱，发到日本",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "delivery",
+      "case_id": "delivery-compression-sg-q1",
+      "concept_terms": [
+        "压缩收纳袋"
+      ],
+      "destination_country": "SG",
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "含 LEGACY-013；新加坡不发货的命中只计入诊断",
+      "query": "旅行压缩收纳袋，寄新加坡",
+      "relevant_canonicals": [
+        "CAN-GX-04-1",
+        "CAN-GX-04-2",
+        "CAN-GX-04-3",
+        "CAN-GX-04-4",
+        "CAN-LEGACY-013"
+      ],
+      "seed_id": "delivery-compression-sg",
+      "spec": {
+        "category": "旅行装备",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "旅行压缩收纳袋，寄新加坡",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "delivery",
+      "case_id": "delivery-compression-sg-q2",
+      "concept_terms": [
+        "压缩收纳袋"
+      ],
+      "destination_country": "SG",
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "含 LEGACY-013；新加坡不发货的命中只计入诊断",
+      "query": "出国用的压缩收纳袋，送到新加坡",
+      "relevant_canonicals": [
+        "CAN-GX-04-1",
+        "CAN-GX-04-2",
+        "CAN-GX-04-3",
+        "CAN-GX-04-4",
+        "CAN-LEGACY-013"
+      ],
+      "seed_id": "delivery-compression-sg",
+      "spec": {
+        "category": "旅行装备",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "出国用的压缩收纳袋，送到新加坡",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "delivery",
+      "case_id": "delivery-baby-towel-cn-q1",
+      "concept_terms": [
+        "婴儿纱布浴巾"
+      ],
+      "destination_country": "CN",
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "中国不发货的命中只计入诊断",
+      "query": "婴儿纱布浴巾，寄到国内",
+      "relevant_canonicals": [
+        "CAN-GX-31-1",
+        "CAN-GX-31-2",
+        "CAN-GX-31-3",
+        "CAN-GX-31-4"
+      ],
+      "seed_id": "delivery-baby-towel-cn",
+      "spec": {
+        "category": "母婴宠物",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "婴儿纱布浴巾，寄到国内",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "delivery",
+      "case_id": "delivery-baby-towel-cn-q2",
+      "concept_terms": [
+        "婴儿纱布浴巾"
+      ],
+      "destination_country": "CN",
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "中国不发货的命中只计入诊断",
+      "query": "新生儿洗澡用的纱布浴巾，发中国",
+      "relevant_canonicals": [
+        "CAN-GX-31-1",
+        "CAN-GX-31-2",
+        "CAN-GX-31-3",
+        "CAN-GX-31-4"
+      ],
+      "seed_id": "delivery-baby-towel-cn",
+      "spec": {
+        "category": "母婴宠物",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "新生儿洗澡用的纱布浴巾，发中国",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "cross_currency",
+      "case_id": "fx-laptop-stand-usd-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-26"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-26；USD 预算换算后落在前两档",
+      "query": "笔记本支架，预算 35 美元",
+      "relevant_canonicals": [
+        "CAN-GX-26-1",
+        "CAN-GX-26-2"
+      ],
+      "seed_id": "fx-laptop-stand-usd",
+      "spec": {
+        "category": "办公学习",
+        "currency": "USD",
+        "excluded_material_tags": [],
+        "normalized_query": "笔记本支架，预算 35 美元",
+        "price_max_major": "35",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "cross_currency",
+      "case_id": "fx-laptop-stand-usd-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-26"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-26；USD 预算换算后落在前两档",
+      "query": "35 美元以内的电脑支架",
+      "relevant_canonicals": [
+        "CAN-GX-26-1",
+        "CAN-GX-26-2"
+      ],
+      "seed_id": "fx-laptop-stand-usd",
+      "spec": {
+        "category": "办公学习",
+        "currency": "USD",
+        "excluded_material_tags": [],
+        "normalized_query": "35 美元以内的电脑支架",
+        "price_max_major": "35",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "cross_currency",
+      "case_id": "fx-pour-over-eur-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-23"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-23；EUR 预算换算后落在前两档",
+      "query": "手冲咖啡壶，30 欧元以内",
+      "relevant_canonicals": [
+        "CAN-GX-23-1",
+        "CAN-GX-23-2"
+      ],
+      "seed_id": "fx-pour-over-eur",
+      "spec": {
+        "category": "厨房餐饮",
+        "currency": "EUR",
+        "excluded_material_tags": [],
+        "normalized_query": "手冲咖啡壶，30 欧元以内",
+        "price_max_major": "30",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "cross_currency",
+      "case_id": "fx-pour-over-eur-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-23"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-23；EUR 预算换算后落在前两档",
+      "query": "咖啡手冲壶，预算 30 欧",
+      "relevant_canonicals": [
+        "CAN-GX-23-1",
+        "CAN-GX-23-2"
+      ],
+      "seed_id": "fx-pour-over-eur",
+      "spec": {
+        "category": "厨房餐饮",
+        "currency": "EUR",
+        "excluded_material_tags": [],
+        "normalized_query": "咖啡手冲壶，预算 30 欧",
+        "price_max_major": "30",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "cross_currency",
+      "case_id": "fx-hair-dryer-jpy-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-19"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-19；JPY 预算换算后落在前三档",
+      "query": "旅行吹风机，4000 日元以内",
+      "relevant_canonicals": [
+        "CAN-GX-19-1",
+        "CAN-GX-19-2",
+        "CAN-GX-19-3"
+      ],
+      "seed_id": "fx-hair-dryer-jpy",
+      "spec": {
+        "category": "美妆个护",
+        "currency": "JPY",
+        "excluded_material_tags": [],
+        "normalized_query": "旅行吹风机，4000 日元以内",
+        "price_max_major": "4000",
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "cross_currency",
+      "case_id": "fx-hair-dryer-jpy-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-19"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-19；JPY 预算换算后落在前三档",
+      "query": "出差用的小吹风机，预算 4000 日元",
+      "relevant_canonicals": [
+        "CAN-GX-19-1",
+        "CAN-GX-19-2",
+        "CAN-GX-19-3"
+      ],
+      "seed_id": "fx-hair-dryer-jpy",
+      "spec": {
+        "category": "美妆个护",
+        "currency": "JPY",
+        "excluded_material_tags": [],
+        "normalized_query": "出差用的小吹风机，预算 4000 日元",
+        "price_max_major": "4000",
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "cross_currency",
+      "case_id": "fx-toiletry-bottle-sgd-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-18"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-18；SGD 预算换算后只剩第一档，正例标签数为 1",
+      "query": "洗漱分装瓶，35 新元以内",
+      "relevant_canonicals": [
+        "CAN-GX-18-1"
+      ],
+      "seed_id": "fx-toiletry-bottle-sgd",
+      "spec": {
+        "category": "美妆个护",
+        "currency": "SGD",
+        "excluded_material_tags": [],
+        "normalized_query": "洗漱分装瓶，35 新元以内",
+        "price_max_major": "35",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "cross_currency",
+      "case_id": "fx-toiletry-bottle-sgd-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-18"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "GX-18；SGD 预算换算后只剩第一档，正例标签数为 1",
+      "query": "旅行装洗发水分装瓶，预算 35 新币",
+      "relevant_canonicals": [
+        "CAN-GX-18-1"
+      ],
+      "seed_id": "fx-toiletry-bottle-sgd",
+      "spec": {
+        "category": "美妆个护",
+        "currency": "SGD",
+        "excluded_material_tags": [],
+        "normalized_query": "旅行装洗发水分装瓶，预算 35 新币",
+        "price_max_major": "35",
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "duplicate_canonical",
+      "case_id": "dup-backpack-ml01-q1",
+      "concept_terms": [
+        "Lingua",
+        "ML-01"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "ML-01 四个 canonical × 27 个本地化/币种变体；去重后每个 canonical 只出现一次",
+      "query": "Lingua 登山背包 20L",
+      "relevant_canonicals": [
+        "CAN-ML-01-1",
+        "CAN-ML-01-2",
+        "CAN-ML-01-3",
+        "CAN-ML-01-4"
+      ],
+      "seed_id": "dup-backpack-ml01",
+      "spec": {
+        "category": "旅行装备",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "Lingua 登山背包 20L",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "duplicate_canonical",
+      "case_id": "dup-backpack-ml01-q2",
+      "concept_terms": [
+        "Lingua",
+        "ML-01"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "ML-01 四个 canonical × 27 个本地化/币种变体；去重后每个 canonical 只出现一次",
+      "query": "Lingua 徒步背包，30 升",
+      "relevant_canonicals": [
+        "CAN-ML-01-1",
+        "CAN-ML-01-2",
+        "CAN-ML-01-3",
+        "CAN-ML-01-4"
+      ],
+      "seed_id": "dup-backpack-ml01",
+      "spec": {
+        "category": "旅行装备",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "Lingua 徒步背包，30 升",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "duplicate_canonical",
+      "case_id": "dup-bottle-ml08-q1",
+      "concept_terms": [
+        "Lingua",
+        "ML-08"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "ML-08 四个 canonical × 27 个变体",
+      "query": "Lingua 保温瓶 500ml",
+      "relevant_canonicals": [
+        "CAN-ML-08-1",
+        "CAN-ML-08-2",
+        "CAN-ML-08-3",
+        "CAN-ML-08-4"
+      ],
+      "seed_id": "dup-bottle-ml08",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "Lingua 保温瓶 500ml",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "duplicate_canonical",
+      "case_id": "dup-bottle-ml08-q2",
+      "concept_terms": [
+        "Lingua",
+        "ML-08"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "ML-08 四个 canonical × 27 个变体",
+      "query": "Lingua 户外保温水壶",
+      "relevant_canonicals": [
+        "CAN-ML-08-1",
+        "CAN-ML-08-2",
+        "CAN-ML-08-3",
+        "CAN-ML-08-4"
+      ],
+      "seed_id": "dup-bottle-ml08",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "Lingua 户外保温水壶",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "duplicate_canonical",
+      "case_id": "dup-sleeping-bag-ml10-q1",
+      "concept_terms": [
+        "Lingua",
+        "ML-10"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "ML-10 四个 canonical × 27 个变体",
+      "query": "Lingua 露营睡袋",
+      "relevant_canonicals": [
+        "CAN-ML-10-1",
+        "CAN-ML-10-2",
+        "CAN-ML-10-3",
+        "CAN-ML-10-4"
+      ],
+      "seed_id": "dup-sleeping-bag-ml10",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "Lingua 露营睡袋",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "duplicate_canonical",
+      "case_id": "dup-sleeping-bag-ml10-q2",
+      "concept_terms": [
+        "Lingua",
+        "ML-10"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "ML-10 四个 canonical × 27 个变体",
+      "query": "Lingua 轻量睡袋",
+      "relevant_canonicals": [
+        "CAN-ML-10-1",
+        "CAN-ML-10-2",
+        "CAN-ML-10-3",
+        "CAN-ML-10-4"
+      ],
+      "seed_id": "dup-sleeping-bag-ml10",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "Lingua 轻量睡袋",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "duplicate_canonical",
+      "case_id": "dup-charger-ml04-q1",
+      "concept_terms": [
+        "Lingua",
+        "ML-04"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "ML-04 四个 canonical × 27 个变体",
+      "query": "Lingua USB-C 充电器 65W",
+      "relevant_canonicals": [
+        "CAN-ML-04-1",
+        "CAN-ML-04-2",
+        "CAN-ML-04-3",
+        "CAN-ML-04-4"
+      ],
+      "seed_id": "dup-charger-ml04",
+      "spec": {
+        "category": "数码配件",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "Lingua USB-C 充电器 65W",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "duplicate_canonical",
+      "case_id": "dup-charger-ml04-q2",
+      "concept_terms": [
+        "Lingua",
+        "ML-04"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "ML-04 四个 canonical × 27 个变体",
+      "query": "Lingua 氮化镓快充头",
+      "relevant_canonicals": [
+        "CAN-ML-04-1",
+        "CAN-ML-04-2",
+        "CAN-ML-04-3",
+        "CAN-ML-04-4"
+      ],
+      "seed_id": "dup-charger-ml04",
+      "spec": {
+        "category": "数码配件",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "Lingua 氮化镓快充头",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "category_missing",
+      "case_id": "missing-category-car-q1",
+      "concept_terms": [],
+      "destination_country": null,
+      "expected_empty": true,
+      "expected_empty_reason": "品类「汽车用品」不存在",
+      "notes": "目录只有 8 个品类，没有汽车用品",
+      "query": "车载吸尘器，吸力大一点的",
+      "relevant_canonicals": [],
+      "seed_id": "missing-category-car",
+      "spec": {
+        "category": "汽车用品",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "车载吸尘器，吸力大一点的",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "category_missing",
+      "case_id": "missing-category-sports-q1",
+      "concept_terms": [],
+      "destination_country": null,
+      "expected_empty": true,
+      "expected_empty_reason": "品类「运动户外」不存在（正确名称是「户外运动」）",
+      "notes": "近似品类名，验证不会误命中",
+      "query": "跑步鞋，缓震好的",
+      "relevant_canonicals": [],
+      "seed_id": "missing-category-sports",
+      "spec": {
+        "category": "运动户外",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "跑步鞋，缓震好的",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "constraint_empty",
+      "case_id": "empty-bottle-budget-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-16"
+      ],
+      "destination_country": null,
+      "expected_empty": true,
+      "expected_empty_reason": "GX-16 最低价约 59 CNY，10 CNY 预算无命中",
+      "notes": "",
+      "query": "十块钱以内的保温壶",
+      "relevant_canonicals": [],
+      "seed_id": "empty-bottle-budget",
+      "spec": {
+        "category": "户外运动",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "十块钱以内的保温壶",
+        "price_max_major": "10",
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "constraint_empty",
+      "case_id": "empty-headphone-fx-q1",
+      "concept_terms": [
+        "Lingua",
+        "ML-05"
+      ],
+      "destination_country": null,
+      "expected_empty": true,
+      "expected_empty_reason": "ML-05 最低价约 121 CNY，1 USD 预算无命中",
+      "notes": "",
+      "query": "一美元以内的降噪耳机",
+      "relevant_canonicals": [],
+      "seed_id": "empty-headphone-fx",
+      "spec": {
+        "category": "数码配件",
+        "currency": "USD",
+        "excluded_material_tags": [],
+        "normalized_query": "一美元以内的降噪耳机",
+        "price_max_major": "1",
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "constraint_empty",
+      "case_id": "empty-suitcase-weight-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-03"
+      ],
+      "destination_country": null,
+      "expected_empty": true,
+      "expected_empty_reason": "GX-03 最轻 0.37 kg，0.05 kg 上限无命中",
+      "notes": "",
+      "query": "50 克以内的行李箱",
+      "relevant_canonicals": [],
+      "seed_id": "empty-suitcase-weight",
+      "spec": {
+        "category": "旅行装备",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "50 克以内的行李箱",
+        "price_max_major": null,
+        "weight_max_kg": 0.05
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "semantic_vague",
+      "case_id": "vague-shaver-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-17"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "标签来自 GX-17，不是查询里的词",
+      "query": "出差带着，早上刮胡子用，别太大",
+      "relevant_canonicals": [
+        "CAN-GX-17-1",
+        "CAN-GX-17-2",
+        "CAN-GX-17-3",
+        "CAN-GX-17-4"
+      ],
+      "seed_id": "vague-shaver",
+      "spec": {
+        "category": "美妆个护",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "出差带着，早上刮胡子用，别太大",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "semantic_vague",
+      "case_id": "vague-shaver-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-17"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "标签来自 GX-17，不是查询里的词",
+      "query": "旅行用的电动剃须刀，能水洗最好",
+      "relevant_canonicals": [
+        "CAN-GX-17-1",
+        "CAN-GX-17-2",
+        "CAN-GX-17-3",
+        "CAN-GX-17-4"
+      ],
+      "seed_id": "vague-shaver",
+      "spec": {
+        "category": "美妆个护",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "旅行用的电动剃须刀，能水洗最好",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "semantic_vague",
+      "case_id": "vague-cleansing-towel-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-20"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "标签来自 GX-20",
+      "query": "旅行时擦脸用的一次性小巾",
+      "relevant_canonicals": [
+        "CAN-GX-20-1",
+        "CAN-GX-20-2",
+        "CAN-GX-20-3",
+        "CAN-GX-20-4"
+      ],
+      "seed_id": "vague-cleansing-towel",
+      "spec": {
+        "category": "美妆个护",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "旅行时擦脸用的一次性小巾",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "semantic_vague",
+      "case_id": "vague-cleansing-towel-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-20"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "标签来自 GX-20",
+      "query": "出门带着的洁面巾，薄一点",
+      "relevant_canonicals": [
+        "CAN-GX-20-1",
+        "CAN-GX-20-2",
+        "CAN-GX-20-3",
+        "CAN-GX-20-4"
+      ],
+      "seed_id": "vague-cleansing-towel",
+      "spec": {
+        "category": "美妆个护",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "出门带着的洁面巾，薄一点",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "test"
+    },
+    {
+      "bucket": "semantic_vague",
+      "case_id": "vague-drying-rack-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-12"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "标签来自 GX-12",
+      "query": "住酒店想晾点手洗的小衣服",
+      "relevant_canonicals": [
+        "CAN-GX-12-1",
+        "CAN-GX-12-2",
+        "CAN-GX-12-3",
+        "CAN-GX-12-4"
+      ],
+      "seed_id": "vague-drying-rack",
+      "spec": {
+        "category": "家居生活",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "住酒店想晾点手洗的小衣服",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "semantic_vague",
+      "case_id": "vague-drying-rack-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-12"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "标签来自 GX-12",
+      "query": "能折叠带走的晾衣架",
+      "relevant_canonicals": [
+        "CAN-GX-12-1",
+        "CAN-GX-12-2",
+        "CAN-GX-12-3",
+        "CAN-GX-12-4"
+      ],
+      "seed_id": "vague-drying-rack",
+      "spec": {
+        "category": "家居生活",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "能折叠带走的晾衣架",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "semantic_vague",
+      "case_id": "vague-neck-pillow-q1",
+      "concept_terms": [
+        "Roamix",
+        "GX-02"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "标签来自 GX-02",
+      "query": "坐飞机睡觉脖子不舒服，想买个靠枕",
+      "relevant_canonicals": [
+        "CAN-GX-02-1",
+        "CAN-GX-02-2",
+        "CAN-GX-02-3",
+        "CAN-GX-02-4"
+      ],
+      "seed_id": "vague-neck-pillow",
+      "spec": {
+        "category": "旅行装备",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "坐飞机睡觉脖子不舒服，想买个靠枕",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    },
+    {
+      "bucket": "semantic_vague",
+      "case_id": "vague-neck-pillow-q2",
+      "concept_terms": [
+        "Roamix",
+        "GX-02"
+      ],
+      "destination_country": null,
+      "expected_empty": false,
+      "expected_empty_reason": null,
+      "notes": "标签来自 GX-02",
+      "query": "长途飞行用的颈枕，轻一点",
+      "relevant_canonicals": [
+        "CAN-GX-02-1",
+        "CAN-GX-02-2",
+        "CAN-GX-02-3",
+        "CAN-GX-02-4"
+      ],
+      "seed_id": "vague-neck-pillow",
+      "spec": {
+        "category": "旅行装备",
+        "currency": "CNY",
+        "excluded_material_tags": [],
+        "normalized_query": "长途飞行用的颈枕，轻一点",
+        "price_max_major": null,
+        "weight_max_kg": null
+      },
+      "split": "dev"
+    }
+  ],
+  "catalog_sha256": "a793a8afced4e31bcf32348cd8b555c9bdd8df1c38a290405aa32396397fbb27",
+  "generator_version": 1,
+  "manifest": {
+    "bucket_counts": {
+      "budget_boundary": 8,
+      "category_missing": 2,
+      "constraint_empty": 3,
+      "cross_currency": 8,
+      "delivery": 8,
+      "duplicate_canonical": 8,
+      "material_exclusion": 8,
+      "semantic_vague": 8
+    },
+    "bucket_split_counts": {
+      "budget_boundary": {
+        "dev": 6,
+        "test": 2
+      },
+      "category_missing": {
+        "dev": 1,
+        "test": 1
+      },
+      "constraint_empty": {
+        "dev": 1,
+        "test": 2
+      },
+      "cross_currency": {
+        "dev": 6,
+        "test": 2
+      },
+      "delivery": {
+        "dev": 6,
+        "test": 2
+      },
+      "duplicate_canonical": {
+        "dev": 6,
+        "test": 2
+      },
+      "material_exclusion": {
+        "dev": 6,
+        "test": 2
+      },
+      "semantic_vague": {
+        "dev": 6,
+        "test": 2
+      }
+    },
+    "case_count": 53,
+    "cases_sha256": "8879776186ce27950d4dd7990100e578d8afc8442a2dbe4d4a9a5700a48229e5",
+    "catalog_sha256": "a793a8afced4e31bcf32348cd8b555c9bdd8df1c38a290405aa32396397fbb27",
+    "config": {
+      "bucket_quotas": {
+        "budget_boundary": 4,
+        "category_missing": 2,
+        "constraint_empty": 3,
+        "cross_currency": 4,
+        "delivery": 4,
+        "duplicate_canonical": 4,
+        "material_exclusion": 4,
+        "semantic_vague": 4
+      },
+      "k": 5,
+      "limit": 10,
+      "split_target": 0.3
+    },
+    "generator_version": 1,
+    "seed_count": 29,
+    "split_counts": {
+      "dev": 38,
+      "test": 15
+    },
+    "version": "s12-golden-v1"
+  },
+  "version": "s12-golden-v1"
+}
